@@ -15,13 +15,6 @@
   open Lexing
   open Common
 
-  (* A list function we need *)
-  let rec take n ls =
-    if n = 0 then [] else
-      match ls with
-        | [] -> []
-        | (l :: ls) -> l :: (take (n-1) ls)
-
   (* count the number of spaces at the beginning of a string *)
   let count_spaces s =
     let n = String.length s in
@@ -95,12 +88,6 @@
     let stop_env () = if !r then stop (); r := false in
       (fun x -> !r), start_env, stop_env
 
-  let _, start_emph, stop_emph = in_env Output.start_emph Output.stop_emph
-  let in_quote, start_quote, stop_quote = in_env Output.start_quote Output.stop_quote
-
-  let url_buffer = Buffer.create 40
-  let url_name_buffer = Buffer.create 40
-
   let backtrack lexbuf = lexbuf.lex_curr_pos <- lexbuf.lex_start_pos;
     lexbuf.lex_curr_p <- lexbuf.lex_start_p
 
@@ -168,34 +155,11 @@
     end else
       true
 
-  (* for item lists *)
-  type list_compare =
-      | Before
-      | StartLevel of int
-      | InLevel of int * bool
 
   (* Before : we're before any levels
      StartLevel : at the same column as the dash in a level
      InLevel : after the dash of this level, but before any deeper dashes.
                bool is true if this is the last level *)
-  let find_level levels cur_indent =
-    match levels with
-    | [] -> Before
-    | (l::ls) ->
-        if cur_indent < l then Before
-        else
-          (* cur_indent will never be less than the head of the list *)
-          let rec findind ls n =
-            match ls with
-            | [] -> InLevel (n,true)
-            | (l :: []) -> if cur_indent = l then StartLevel n
-                           else InLevel (n,true)
-            | (l1 :: l2 :: ls) ->
-                if cur_indent = l1 then StartLevel n
-                else if cur_indent < l2 then InLevel (n,false)
-                     else findind (l2 :: ls) (n+1)
-          in
-            findind (l::ls) 1
 
   type is_start_list =
     | Rule
@@ -509,20 +473,12 @@ let gallina_kw_to_hide =
   | "Collection"
 
 
-let section = "*" | "**" | "***" | "****"
-
-let item_space = "    "
-
 let begin_hide = "(*" space* "begin" space+ "hide" space* "*)" space*
 let end_hide = "(*" space* "end" space+ "hide" space* "*)" space*
 let begin_show = "(*" space* "begin" space+ "show" space* "*)" space*
 let end_show = "(*" space* "end" space+ "show" space* "*)" space*
 let begin_details = "(*" space* "begin" space+ "details" space*
 let end_details = "(*" space* "end" space+ "details" space* "*)" space*
-(*
-let begin_verb = "(*" space* "begin" space+ "verb" space* "*)"
-let end_verb = "(*" space* "end" space+ "verb" space* "*)"
-*)
 
 (*s Scanning Coq, at beginning of line *)
 
@@ -535,7 +491,7 @@ rule coq_bol = parse
   | space* "(**" (space_nl as s)
     { if is_nl s then new_lines 1 lexbuf;
       Output.end_coq (); Output.start_doc ();
-      let eol = doc_bol lexbuf in
+      let eol = doc lexbuf in
         Output.end_doc (); Output.start_coq ();
         if eol then coq_bol lexbuf else coq lexbuf }
   | space* "Comments" (space_nl as s)
@@ -664,7 +620,7 @@ and coq = parse
   | "(**" (space_nl as s)
     { if is_nl s then new_lines 1 lexbuf;
       Output.end_coq (); Output.start_doc ();
-      let eol = doc_bol lexbuf in
+      let eol = doc lexbuf in
         Output.end_doc (); Output.start_coq ();
         if eol then coq_bol lexbuf else coq lexbuf }
   | "(*"
@@ -757,281 +713,34 @@ and coq = parse
         in
           if eol then coq_bol lexbuf else coq lexbuf}
 
-(*s Scanning documentation, at beginning of line *)
-
-and doc_bol = parse
-  | space* section space+ ([^'\n' '\r' '*'] | '*'+ [^'\n' '\r' ')' '*'])* ('*'+ (nl as s))?
-      { if not (is_none s) then new_lines 1 lexbuf;
-        let eol, lex = strip_eol (lexeme lexbuf) in
-        let lev, s = sec_title lex in
-          if (!prefs.lib_subtitles) &&
-             (subtitle (Output.get_module false) s) then
-            ()
-          else
-            Output.section lev (fun () -> ignore (doc None (from_string s)));
-            if eol then doc_bol lexbuf else doc None lexbuf }
-  | ((space_nl* nl)? as s) (space* '-'+ as line)
-      { let nl_count = count_newlines s in
-        match check_start_list line with
-          | Neither -> backtrack_past_newline lexbuf; new_lines 1 lexbuf; doc None lexbuf
-          | List n ->
-              new_lines nl_count lexbuf;
-              if nl_count > 0 then Output.paragraph ();
-              Output.item 1; doc (Some [n]) lexbuf
-          | Rule ->
-              new_lines nl_count lexbuf;
-              Output.rule (); doc None lexbuf
-      }
-  | (space_nl* nl) as s
-      { new_lines (count_newlines s) lexbuf; Output.paragraph (); doc_bol lexbuf }
-  | "<<" space* nl
-      { new_lines 1 lexbuf; Output.start_verbatim false; verbatim_block lexbuf; doc_bol lexbuf }
-  | "<<"
-      { Output.start_verbatim true; verbatim_inline lexbuf; doc None lexbuf }
-  | eof
-      { true }
-  | '_'
-      { if !prefs.plain_comments then Output.char '_' else start_emph ();
-        doc None lexbuf }
-  | "" { doc None lexbuf }
-
-(*s Scanning lists - using whitespace *)
-and doc_list_bol indents = parse
-  | space* '-'
-      { let (n_spaces,_) = count_spaces (lexeme lexbuf) in
-        match find_level indents n_spaces with
-        | Before -> backtrack lexbuf; doc_bol lexbuf
-        | StartLevel n -> Output.item n; doc (Some (take n indents)) lexbuf
-        | InLevel (n,true) ->
-            let items = List.length indents in
-              Output.item (items+1);
-              doc (Some (List.append indents [n_spaces])) lexbuf
-        | InLevel (_,false) ->
-            backtrack lexbuf; doc_bol lexbuf
-      }
-  | "<<" space* nl
-      { new_lines 1 lexbuf; Output.start_verbatim false;
-        verbatim_block lexbuf;
-        doc_list_bol indents lexbuf }
-  | "<<" space*
-      { Output.start_verbatim true;
-        verbatim_inline lexbuf;
-        doc (Some indents) lexbuf }
-  | "[[" nl
-      { new_lines 1 lexbuf; formatted := Some lexbuf.lex_start_p;
-        Output.start_inline_coq_block ();
-        ignore(body_bol lexbuf);
-        Output.end_inline_coq_block ();
-        formatted := None;
-        doc_list_bol indents lexbuf }
-  | "[[[" nl
-      { new_lines 1 lexbuf; inf_rules (Some indents) lexbuf }
-  | space* nl space* '-'
-      { (* Like in the doc_bol production, these two productions
-           exist only to deal properly with whitespace *)
-        new_lines 1 lexbuf;
-        Output.paragraph ();
-        backtrack_past_newline lexbuf;
-        doc_list_bol indents lexbuf }
-  | space* nl space* _
-      { new_lines 1 lexbuf;
-        let buf' = lexeme lexbuf in
-        let buf =
-          let bufs = Str.split_delim (Str.regexp "['\n']") buf' in
-            match bufs with
-              | (_ :: s :: []) -> s
-              | (_ :: _ :: s :: _) -> s
-              | _ -> eprintf "Internal error bad_split2 - please report\n";
-                     exit 1
-        in
-        let (n_spaces,_) = count_spaces buf in
-        match find_level indents n_spaces with
-        | StartLevel 1 | Before ->
-        (* Here we were at the beginning of a line, and it was blank.
-           The next line started before any list items.  So: insert
-           a paragraph for the empty line, rewind to whatever's just
-           after the newline, then toss over to doc_bol for whatever
-           comes next. *)
-            Output.stop_item ();
-            Output.paragraph ();
-            backtrack_past_newline lexbuf;
-            doc_bol lexbuf
-        | StartLevel _ | InLevel _ ->
-            Output.paragraph ();
-            backtrack_past_newline lexbuf;
-            doc_list_bol indents lexbuf
-
-      }
-  | space* _
-      { let (n_spaces,_) = count_spaces (lexeme lexbuf) in
-        match find_level indents n_spaces with
-        | Before -> Output.stop_item (); backtrack lexbuf;
-                    doc_bol lexbuf
-        | StartLevel n ->
-            Output.reach_item_level (n-1);
-            backtrack lexbuf;
-            doc (Some (take (n-1) indents)) lexbuf
-        | InLevel (n,_) ->
-            Output.reach_item_level n;
-            backtrack lexbuf;
-            doc (Some (take n indents)) lexbuf
-      }
-
-(*s Scanning documentation elsewhere *)
-and doc indents = parse
+(*s Scanning documentation anywhere *)
+and doc = parse
   | nl
       { new_lines 1 lexbuf;
         Output.char '\n';
-        match indents with
-        | Some ls -> doc_list_bol ls lexbuf
-        | None -> doc_bol lexbuf }
-  | "[[" nl
-      { new_lines 1 lexbuf;
-        if !prefs.plain_comments
-        then (Output.char '['; Output.char '['; doc indents lexbuf)
-        else (formatted := Some lexbuf.lex_start_p;
-              Output.start_inline_coq_block ();
-              let eol = body_bol lexbuf in
-                Output.end_inline_coq_block (); formatted := None;
-                if eol then
-                  match indents with
-                  | Some ls -> doc_list_bol ls lexbuf
-                  | None -> doc_bol lexbuf
-                else doc indents lexbuf)}
-  | "[[[" nl
-      { new_lines 1 lexbuf; inf_rules indents lexbuf }
-  | "[]"
-      { Output.proofbox (); doc indents lexbuf }
-  | "{{" { url lexbuf; doc indents lexbuf }
+        doc lexbuf }
   | "["
       { if !prefs.plain_comments then Output.char '['
         else (brackets := 1;  Output.start_inline_coq (); escaped_coq lexbuf;
-              Output.end_inline_coq ()); doc indents lexbuf }
+              Output.end_inline_coq ()); doc lexbuf }
   | "(*"
       { backtrack lexbuf ;
-        let bol_parse = match indents with
-                        | Some is -> doc_list_bol is
-                        | None   -> doc_bol
-        in
         let eol =
           if !prefs.parse_comments then comment lexbuf
           else skipped_comment lexbuf in
-        if eol then bol_parse lexbuf else doc indents lexbuf }
-  | '*'* "*)" (space_nl* as s) "(**"
-      { let nl_count = count_newlines s in
-        new_lines nl_count lexbuf;
-       (match indents with
-        | Some _ -> Output.stop_item ()
-        | None -> ());
-       (* this says - if there is a blank line between the two comments,
-          insert one in the output too *)
-         if nl_count > 1 then Output.paragraph ();
-       doc_bol lexbuf
-      }
-  | '*'* "*)" space* nl
-      { new_lines 1 lexbuf; Output.char '\n'; true }
+        if eol then doc lexbuf else doc lexbuf }
   | '*'* "*)"
       { false }
-  | "$"
-      { if !prefs.plain_comments then Output.char '$'
-        else (Output.start_latex_math (); escaped_math_latex lexbuf);
-        doc indents lexbuf }
-  | "$$"
-      { if !prefs.plain_comments then Output.char '$';
-        Output.char '$'; doc indents lexbuf }
-  | "%"
-      { if !prefs.plain_comments then Output.char '%'
-        else escaped_latex lexbuf; doc indents lexbuf }
-  | "%%"
-      { if !prefs.plain_comments then Output.char '%';
-        Output.char '%'; doc indents lexbuf }
-  | "#"
-      { if !prefs.plain_comments then Output.char '#'
-        else escaped_html lexbuf; doc indents lexbuf }
-  | "##"
-      { if !prefs.plain_comments then Output.char '#';
-        Output.char '#'; doc indents lexbuf }
   | nonidentchar '_' nonidentchar
       { List.iter (fun x -> Output.char (lexeme_char lexbuf x)) [0;1;2];
-        doc indents lexbuf}
-  | nonidentchar '_'
-      { Output.char (lexeme_char lexbuf 0);
-        if !prefs.plain_comments then Output.char '_' else  start_emph () ;
-        doc indents lexbuf }
-  | '_' nonidentchar
-      { if !prefs.plain_comments then Output.char '_' else stop_emph () ;
-        Output.char (lexeme_char lexbuf 1);
-        doc indents lexbuf }
-  | "<<" space*
-      { Output.start_verbatim true; verbatim_inline lexbuf; doc indents lexbuf }
-  | '"'
-      { if !prefs.plain_comments
-        then Output.char '"'
-        else if in_quote ()
-        then stop_quote ()
-        else start_quote ();
-        doc indents lexbuf }
+        doc lexbuf}
   | eof
       { false }
   | _
-      { Output.char (lexeme_char lexbuf 0); doc indents lexbuf }
+      { Output.char (lexeme_char lexbuf 0); doc lexbuf }
 
 (*s Various escapings *)
 
-and escaped_math_latex = parse
-  | "$" { Output.stop_latex_math () }
-  | eof { Output.stop_latex_math () }
-  | "*)"
-        { Output.stop_latex_math (); backtrack lexbuf }
-  | _   { Output.latex_char (lexeme_char lexbuf 0); escaped_math_latex lexbuf }
-
-and escaped_latex = parse
-  | "%" { () }
-  | eof { () }
-  | "*)"
-        { backtrack lexbuf }
-  | _   { Output.latex_char (lexeme_char lexbuf 0); escaped_latex lexbuf }
-
-and escaped_html = parse
-  | "#" { () }
-  | "&#"
-        { Output.html_char '&'; Output.html_char '#'; escaped_html lexbuf }
-  | "##"
-        { Output.html_char '#'; escaped_html lexbuf }
-  | eof { () }
-  | "*)"
-        { backtrack lexbuf }
-  | _   { Output.html_char (lexeme_char lexbuf 0); escaped_html lexbuf }
-
-and verbatim_block = parse
-  | nl ">>" space* nl { new_lines 2 lexbuf; Output.verbatim_char false '\n'; Output.stop_verbatim false }
-  | nl ">>"
-        { new_lines 1 lexbuf;
-          warn "missing newline after \">>\" block" lexbuf;
-          Output.verbatim_char false '\n';
-          Output.stop_verbatim false }
-  | eof { warn "unterminated \">>\" block" lexbuf; Output.stop_verbatim false }
-  | nl { new_lines 1 lexbuf; Output.verbatim_char false (lexeme_char lexbuf 0); verbatim_block lexbuf }
-  | _ { Output.verbatim_char false (lexeme_char lexbuf 0); verbatim_block lexbuf }
-
-and verbatim_inline = parse
-  | nl { new_lines 1 lexbuf;
-         warn "unterminated inline \">>\"" lexbuf;
-         Output.char '\n';
-         Output.stop_verbatim true }
-  | ">>" { Output.stop_verbatim true }
-  | eof { warn "unterminated inline \">>\"" lexbuf; Output.stop_verbatim true }
-  | _ { Output.verbatim_char true (lexeme_char lexbuf 0); verbatim_inline lexbuf }
-
-and url = parse
-  | "}}" { Output.url (Buffer.contents url_buffer) None; Buffer.clear url_buffer }
-  | "}" { url_name lexbuf }
-  | _ { Buffer.add_char url_buffer (lexeme_char lexbuf 0); url lexbuf }
-
-and url_name = parse
-  | "}" { Output.url (Buffer.contents url_buffer) (Some (Buffer.contents url_name_buffer));
-          Buffer.clear url_buffer; Buffer.clear url_name_buffer }
-  | _ { Buffer.add_char url_name_buffer (lexeme_char lexbuf 0); url_name lexbuf }
 
 (*s Coq, inside quotations *)
 
@@ -1079,7 +788,7 @@ and comments = parse
   | '"' [^ '"']* '"'
       { let s = lexeme lexbuf in
         let s = String.sub s 1 (String.length s - 2) in
-        ignore (doc None (from_string s)); comments lexbuf }
+        ignore (doc (from_string s)); comments lexbuf }
   | ([^ '.' '"'] | '.' [^ ' ' '\t' '\n'])+
       { escaped_coq (from_string (lexeme lexbuf)); comments lexbuf }
   | "." (space_nl | eof)
@@ -1130,30 +839,6 @@ and comment = parse
               Output.start_inline_coq_block ();
               let _ = body_bol lexbuf in
                 Output.end_inline_coq_block (); formatted := None);
-        comment lexbuf }
-  | "$"
-      { if !prefs.plain_comments then Output.char '$'
-        else (Output.start_latex_math (); escaped_math_latex lexbuf);
-        comment lexbuf }
-  | "$$"
-      { if !prefs.plain_comments then Output.char '$';
-        Output.char '$';
-        comment lexbuf }
-  | "%"
-      { if !prefs.plain_comments then Output.char '%'
-        else escaped_latex lexbuf;
-        comment lexbuf }
-  | "%%"
-      { if !prefs.plain_comments then Output.char '%';
-        Output.char '%';
-        comment lexbuf }
-  | "#"
-      { if !prefs.plain_comments then Output.char '#'
-        else escaped_html lexbuf;
-        comment lexbuf }
-  | "##"
-      { if !prefs.plain_comments then Output.char '#';
-        Output.char '#';
         comment lexbuf }
   | eof  { false }
   | space+
@@ -1263,7 +948,7 @@ and body = parse
   | "(**" (space_nl as s)
       { if is_nl s then new_line lexbuf;
         Tokens.flush_sublexer(); Output.end_coq (); Output.start_doc ();
-        let eol = doc_bol lexbuf in
+        let eol = doc lexbuf in
           Output.end_doc (); Output.start_coq ();
           if eol then body_bol lexbuf else body lexbuf }
   | "(*"
@@ -1364,10 +1049,7 @@ and inf_rules indents = parse
   | space* nl     (* blank line, before or between definitions *)
       { new_lines 1 lexbuf; inf_rules indents lexbuf }
   | "]]]" nl      (* end of the inference rules block *)
-      { new_lines 1 lexbuf;
-        match indents with
-        | Some ls -> doc_list_bol ls lexbuf
-        | None -> doc_bol lexbuf }
+      { new_lines 1 lexbuf; doc lexbuf }
   | _
       { backtrack lexbuf;  (* anything else must be the first line in a rule *)
         inf_rules_assumptions indents [] lexbuf}

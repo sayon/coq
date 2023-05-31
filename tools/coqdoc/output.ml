@@ -584,24 +584,28 @@ module Html = struct
 
   let nbsp () = printf "&nbsp;"
 
-  let char = function
-    | '<' -> printf "&lt;"
-    | '>' -> printf "&gt;"
-    | '&' -> printf "&amp;"
-    | c -> output_char c
+  let char = fun c -> output_char c
+(* function *)
+(*     | '<' -> printf "&lt;" *)
+(*     | '>' -> printf "&gt;" *)
+(*     | '&' -> printf "&amp;" *)
+(*     | c -> output_char c *)
 
   let escaped =
     let buff = Buffer.create 5 in
     fun s ->
       Buffer.clear buff;
-      for i = 0 to String.length s - 1 do
-        match s.[i] with
-        | '<' -> Buffer.add_string buff "&lt;"
-        | '>' -> Buffer.add_string buff "&gt;"
-        | '&' -> Buffer.add_string buff "&amp;"
-        | '\"' -> Buffer.add_string buff "&quot;"
-        | c -> Buffer.add_char buff c
-      done;
+      Buffer.add_string buff s;
+      (* for i = 0 to String.length s - 1 do *)
+      (*   Buffer.add_char buff c *)
+        (* match s.[i] with *)
+        (* *)
+        (* | '<' -> Buffer.add_string buff "&lt;" *)
+        (* | '>' -> Buffer.add_string buff "&gt;" *)
+        (* | '&' -> Buffer.add_string buff "&amp;" *)
+        (* | '\"' -> Buffer.add_string buff "&quot;" *)
+        (* | c -> Buffer.add_char buff c *)
+      (* done; *)
       Buffer.contents buff
 
   let sanitize_name s =
@@ -629,13 +633,9 @@ module Html = struct
   let start_quote () = char '"'
   let stop_quote () = start_quote ()
 
-  let start_verbatim inline =
-    if inline then printf "<code>"
-    else printf "<pre>\n"
+  let start_verbatim inline = ()
 
-  let stop_verbatim inline =
-    if inline then printf "</code>"
-    else printf "</pre>\n"
+  let stop_verbatim inline = ()
 
   let url addr name =
     printf "<a href=\"%s\">%s</a>" addr
@@ -747,11 +747,11 @@ module Html = struct
 
   let start_doc () = in_doc := true;
     if not !prefs.raw_comments then
-      printf "\n<div class=\"doc\">\n"
+      printf "\n<div class=\"doc\">%%DOCSTART%%\n"
 
   let end_doc () = in_doc := false;
     stop_item ();
-    if not !prefs.raw_comments then printf "</div>\n"
+    if not !prefs.raw_comments then printf "%%DOCEND%%</div>\n"
 
   let start_emph () = printf "<i>"
 
@@ -1282,11 +1282,6 @@ let latex_string =
 let html_char = select Latex.html_char Html.html_char TeXmacs.html_char Raw.html_char
 let html_string =
   select Latex.html_string Html.html_string TeXmacs.html_string Raw.html_string
-
-let start_emph =
-  select Latex.start_emph Html.start_emph TeXmacs.start_emph Raw.start_emph
-let stop_emph =
-  select Latex.stop_emph Html.stop_emph TeXmacs.stop_emph Raw.stop_emph
 
 let start_details =
   select Latex.start_details Html.start_details TeXmacs.start_details Raw.start_details
