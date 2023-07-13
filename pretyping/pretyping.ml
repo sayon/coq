@@ -122,12 +122,11 @@ let esearch_guard ?loc env sigma indexes fix =
 
 (* To force universe name declaration before use *)
 
-let is_strict_universe_declarations =
+let { Goptions.get = is_strict_universe_declarations } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Strict";"Universe";"Declaration"]
     ~value:true
+    ()
 
 (** Miscellaneous interpretation functions *)
 
@@ -1095,8 +1094,8 @@ struct
     in
     (* Make dependencies from arity signature impossible *)
     let arsgn, indr =
-      let arsgn,s = get_arity !!env indf in
-      List.map (set_name Anonymous) arsgn, Sorts.relevance_of_sort_family s
+      let arsgn = get_arity !!env indf in
+      List.map (set_name Anonymous) arsgn, Inductiveops.relevance_of_inductive_family !!env indf
     in
       let indt = build_dependent_inductive !!env indf in
       let psign = LocalAssum (make_annot na indr, indt) :: arsgn in (* For locating names in [po] *)
@@ -1161,9 +1160,9 @@ struct
                       (str "If is only for inductive types with two constructors.");
 
       let arsgn, indr =
-        let arsgn,s = get_arity !!env indf in
+        let arsgn = get_arity !!env indf in
         (* Make dependencies from arity signature impossible *)
-        List.map (set_name Anonymous) arsgn, Sorts.relevance_of_sort_family s
+        List.map (set_name Anonymous) arsgn, Inductiveops.relevance_of_inductive_family !!env indf
       in
       let nar = List.length arsgn in
       let indt = build_dependent_inductive !!env indf in
@@ -1451,6 +1450,9 @@ let understand_tcc ?flags env sigma ?expected_type c =
 let understand_ltac flags env sigma lvar kind c =
   let (sigma, c, _) = ise_pretype_gen flags env sigma lvar kind c in
   (sigma, c)
+
+let understand_ltac_ty flags env sigma lvar kind c =
+  ise_pretype_gen flags env sigma lvar kind c
 
 (* Fully evaluate an untyped constr *)
 let understand_uconstr ?(flags = all_and_fail_flags)

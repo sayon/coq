@@ -28,19 +28,17 @@ module RelDecl = Context.Rel.Declaration
 
 (********** definition d'un record (structure) **************)
 
-let typeclasses_strict =
+let { Goptions.get = typeclasses_strict } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Typeclasses";"Strict";"Resolution"]
     ~value:false
+    ()
 
-let typeclasses_unique =
+let { Goptions.get = typeclasses_unique } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Typeclasses";"Unique";"Instances"]
     ~value:false
+    ()
 
 let interp_fields_evars env sigma ~ninds ~nparams impls_env nots l =
   let _, sigma, impls, newfs, _ =
@@ -227,8 +225,9 @@ let typecheck_params_and_fields def poly udecl ps (records : DataI.t list) : tc_
         if Sorts.is_small univ &&
            Option.cata (Evd.is_flexible_level sigma) false (Evd.is_sort_variable sigma esort) then
            (* We can assume that the level in aritysort is not constrained
-               and clear it, if it is flexible *)
-          Evd.set_eq_sort env_ar sigma EConstr.ESorts.set esort, (univ, EConstr.mkSort (EConstr.ESorts.make univ))
+               and clear it, if it is flexible *) begin
+          ComInductive.Internal.warn_bad_set_minimization ();
+          Evd.set_eq_sort env_ar sigma EConstr.ESorts.set esort, (univ, EConstr.mkSort (EConstr.ESorts.make univ)) end
         else sigma, (univ, typ)
   in
   let (sigma, typs) = List.fold_left2_map fold sigma typs data in
@@ -342,7 +341,7 @@ let declare_proj_coercion_instance ~flags ref from ~poly ~with_coercion =
   if with_coercion && flags.Data.pf_coercion then begin
     let cl = ComCoercion.class_of_global from in
     let local = flags.Data.pf_locality = Goptions.OptLocal in
-    ComCoercion.try_add_new_coercion_with_source ref ~local ~poly ~nonuniform:false ~reversible:flags.Data.pf_reversible ~source:cl
+    ComCoercion.try_add_new_coercion_with_source ref ~local ~poly ~reversible:flags.Data.pf_reversible ~source:cl
   end;
   if flags.Data.pf_instance then begin
     let env = Global.env () in
@@ -636,17 +635,19 @@ let implicits_of_context ctx =
 (* deprecated in 8.16, to be removed at the end of the deprecation phase
    (c.f., https://github.com/coq/coq/pull/15802 ) *)
 let warn_future_coercion_class_constructor =
-  CWarnings.create ~name:"future-coercion-class-constructor" ~category:CWarnings.CoreCategories.deprecated
+  CWarnings.create ~name:"future-coercion-class-constructor" ~category:Deprecation.Version.v8_16
     ~default:CWarnings.AsError
     Pp.(fun () -> str "'Class >' currently does nothing. Use 'Class' instead.")
 
 (* deprecated in 8.17, to be removed at the end of the deprecation phase
    (c.f., https://github.com/coq/coq/pull/16230 ) *)
 let warn_future_coercion_class_field =
-  CWarnings.create ~name:"future-coercion-class-field" ~category:CWarnings.CoreCategories.deprecated Pp.(fun definitional ->
+  CWarnings.create ~name:"future-coercion-class-field" ~category:Deprecation.Version.v8_17
+    Pp.(fun definitional ->
     strbrk "A coercion will be introduced instead of an instance in future versions when using ':>' in 'Class' declarations. "
-    ++ strbrk "Replace ':>' with '::' (or use '#[global] Existing Instance field.' for compatibility with Coq < 8.17). Beware that the default locality for '::' is #[export], as opposed to #[global] for ':>' currently."
-    ++ strbrk (if definitional then "" else " Add an explicit #[global] attribute to the field if you need to keep the current behavior. For example: \"Class foo := { #[global] field :: bar }.\""))
+    ++ strbrk "Replace ':>' with '::' (or use '#[global] Existing Instance field.' for compatibility with Coq < 8.18). Beware that the default locality for '::' is #[export], as opposed to #[global] for ':>' currently."
+    ++ strbrk (if definitional then " Add an explicit #[global] attribute if you need to keep the current behavior. For example: \"Class foo := #[global] baz :: bar.\""
+               else " Add an explicit #[global] attribute to the field if you need to keep the current behavior. For example: \"Class foo := { #[global] field :: bar }.\""))
 
 let check_proj_flags kind rf =
   let open Vernacexpr in
@@ -804,7 +805,7 @@ let declare_structure { Record_decl.mie; primitive_proj; impls; globnames; globa
     let cstr = (rsp, 1) in
     let projections = declare_projections rsp (projunivs,ubinders) ~kind:projections_kind inhabitant_id proj_flags implfs fields in
     let build = GlobRef.ConstructRef cstr in
-    let () = if is_coercion then ComCoercion.try_add_new_coercion build ~local:false ~poly ~nonuniform:false ~reversible:true in
+    let () = if is_coercion then ComCoercion.try_add_new_coercion build ~local:false ~poly ~reversible:true in
     let struc = Structure.make (Global.env ()) rsp projections in
     let () = declare_structure_entry struc in
     GlobRef.IndRef rsp

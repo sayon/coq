@@ -225,11 +225,11 @@ let set_option = let open Goptions in function
   | opt, OptionAppend v -> set_string_option_append_value_gen ~locality:OptLocal opt v
 
 let get_compat_file = function
+  | "8.19" -> "Coq.Compat.Coq819"
   | "8.18" -> "Coq.Compat.Coq818"
   | "8.17" -> "Coq.Compat.Coq817"
   | "8.16" -> "Coq.Compat.Coq816"
-  | "8.15" -> "Coq.Compat.Coq815"
-  | ("8.14" | "8.13" | "8.12" | "8.11" | "8.10" | "8.9" | "8.8" | "8.7" | "8.6" | "8.5" | "8.4" | "8.3" | "8.2" | "8.1" | "8.0") as s ->
+  | ("8.15" | "8.14" | "8.13" | "8.12" | "8.11" | "8.10" | "8.9" | "8.8" | "8.7" | "8.6" | "8.5" | "8.4" | "8.3" | "8.2" | "8.1" | "8.0") as s ->
     CErrors.user_err
       Pp.(str "Compatibility with version " ++ str s ++ str " not supported.")
   | s ->
@@ -306,9 +306,6 @@ let parse_args ~usage ~init arglist : t * string list =
     |"-init-file" ->
       { oval with config = { oval.config with rcfile = Some (next ()); }}
 
-    |"-load-vernac-object" ->
-      add_vo_require oval (next ()) None None
-
     |"-load-vernac-source"|"-l" ->
       add_load_vernacular oval false (next ())
 
@@ -324,12 +321,15 @@ let parse_args ~usage ~init arglist : t * string list =
       Flags.profile_ltac_cutoff := get_float ~opt (next ());
       oval
 
-    |"-rfrom" ->
-      let from = next () in add_vo_require oval (next ()) (Some from) None
+    |"-load-vernac-object"|"-require" ->
+      add_vo_require oval (next ()) None None
 
     |"-require-import" | "-ri" -> add_vo_require oval (next ()) None (Some Lib.Import)
 
     |"-require-export" | "-re" -> add_vo_require oval (next ()) None (Some Lib.Export)
+
+    |"-require-from"|"-rfrom" ->
+      let from = next () in add_vo_require oval (next ()) (Some from) None
 
     |"-require-import-from" | "-rifrom" ->
       let from = next () in add_vo_require oval (next ()) (Some from) (Some Lib.Import)

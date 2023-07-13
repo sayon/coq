@@ -261,8 +261,7 @@ end
 module Grammar = Register(GrammarObj)
 
 let warn_deprecated_intropattern =
-  let open CWarnings in
-  create ~name:"deprecated-intropattern-entry" ~category:CWarnings.CoreCategories.deprecated
+  CWarnings.create ~name:"deprecated-intropattern-entry" ~category:Deprecation.Version.v8_11
   (fun () -> Pp.strbrk "Entry name intropattern has been renamed in order \
   to be consistent with the documented grammar of tactics. Use \
   \"simple_intropattern\" instead.")
@@ -368,7 +367,7 @@ let epsilon_value (type s tr a) f (e : (s, tr, a) Symbol.t) =
   let entry = Entry.make "epsilon" in
   let ext = Fresh (Gramlib.Gramext.First, [None, None, [r]]) in
   safe_extend entry ext;
-  try Some (parse_string entry "") with _ -> None
+  try Some (parse_string entry "") with e when CErrors.noncritical e -> None
 
 (** Synchronized grammar extensions *)
 
@@ -485,7 +484,7 @@ type frozen_t =
   (grammar_entry * GramState.t) list *
   CLexer.keyword_state
 
-let freeze ~marshallable : frozen_t =
+let freeze () : frozen_t =
   (!grammar_stack, !keyword_state)
 
 let eq_grams (g1, _) (g2, _) = match g1, g2 with
@@ -536,7 +535,7 @@ let parser_summary_tag =
       Summary.init_function = Summary.nop }
 
 let with_grammar_rule_protection f x =
-  let fs = freeze ~marshallable:false in
+  let fs = freeze () in
   try let a = f x in unfreeze fs; a
   with reraise ->
     let reraise = Exninfo.capture reraise in

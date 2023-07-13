@@ -125,7 +125,7 @@ let mk_induction_clause (arg, eqn, as_, occ) =
 let induction_destruct isrec ev (ic : induction_clause list) using =
   let ic = List.map mk_induction_clause ic in
   let using = Option.map mk_with_bindings using in
-  Tactics.induction_destruct isrec ev (ic, using)
+  Induction.induction_destruct isrec ev (ic, using)
 
 let elim ev c copt =
   let c = mk_with_bindings c in
@@ -135,7 +135,7 @@ let elim ev c copt =
 let generalize pl =
   let mk_occ occs = mk_occurrences (fun i -> i) occs in
   let pl = List.map (fun (c, occs, na) -> (mk_occ occs, c), na) pl in
-  Tactics.new_generalize_gen pl
+  Generalize.new_generalize_gen pl
 
 let general_case_analysis ev c =
   let c = mk_with_bindings c in

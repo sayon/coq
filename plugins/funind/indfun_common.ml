@@ -301,19 +301,17 @@ let pr_table env sigma = pr_table env sigma !from_function
 (*********************************)
 (* Debugging *)
 
-let do_rewrite_dependent =
+let { Goptions.get = do_rewrite_dependent } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Functional"; "Induction"; "Rewrite"; "Dependent"]
     ~value:true
+    ()
 
-let do_observe =
+let { Goptions.get = do_observe } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Function_debug"]
     ~value:false
+    ()
 
 let observe strm = if do_observe () then Feedback.msg_debug strm else ()
 let debug_queue = Stack.create ()
@@ -356,12 +354,11 @@ let do_observe_tac ~header s tac =
 let observe_tac ~header s tac =
   if do_observe () then do_observe_tac ~header s tac else tac
 
-let is_strict_tcc =
+let { Goptions.get = is_strict_tcc } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Function_raw_tcc"]
     ~value:false
+    ()
 
 exception Building_graph of exn
 exception Defining_principle of exn
@@ -402,7 +399,7 @@ let make_eq () =
   try
     EConstr.of_constr
       (UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "core.eq.type"))
-  with _ -> assert false
+  with e when CErrors.noncritical e -> assert false
 
 let evaluable_of_global_reference r =
   let open Tacred in
@@ -467,7 +464,7 @@ type tcc_lemma_value = Undefined | Value of constr | Not_needed
 
 (* We only "purify" on exceptions. XXX: What is this doing here? *)
 let funind_purify f x =
-  let st = Vernacstate.freeze_full_state ~marshallable:false in
+  let st = Vernacstate.freeze_full_state () in
   try f x
   with e ->
     let e = Exninfo.capture e in

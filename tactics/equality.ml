@@ -61,12 +61,11 @@ let use_injection_pattern_l2r_order = function
   | None -> true
   | Some flags -> flags.injection_pattern_l2r_order
 
-let injection_in_context_flag =
+let { Goptions.get = injection_in_context_flag } =
   declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Structural";"Injection"]
     ~value:false
+    ()
 
 (* Rewriting tactics *)
 
@@ -719,7 +718,7 @@ let keep_proof_equalities_for_injection = ref false
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Keep";"Proof";"Equalities"];
       optread  = (fun () -> !keep_proof_equalities_for_injection) ;
       optwrite = (fun b -> keep_proof_equalities_for_injection := b) }
@@ -1355,6 +1354,12 @@ let build_injector env sigma dflt c cpath =
 let eq_dec_scheme_kind_name = ref (fun _ -> failwith "eq_dec_scheme undefined")
 let set_eq_dec_scheme_kind k = eq_dec_scheme_kind_name := (fun _ -> k)
 
+let warn_inject_no_eqdep_dec =
+  CWarnings.create ~name:"injection-missing-eqdep-dec" ~category:CWarnings.CoreCategories.tactics
+    Pp.(fun (env,ind) ->
+        str "The equality scheme for" ++ spc() ++ Printer.pr_inductive env ind ++ spc() ++
+        str "could not be used as Coq.Logic.Eqdep_dec has not been required.")
+
 let inject_if_homogenous_dependent_pair ty =
   Proofview.Goal.enter begin fun gl ->
   try
@@ -1377,10 +1382,14 @@ let inject_if_homogenous_dependent_pair ty =
     (* Note: should work even if not an inductive type, but the table only *)
     (* knows inductive types *)
     if not (Option.has_some (Ind_tables.lookup_scheme (!eq_dec_scheme_kind_name()) ind) &&
-      pf_apply is_conv gl ar1.(2) ar2.(2)) then raise_notrace Exit;
-    check_required_library ["Coq";"Logic";"Eqdep_dec"];
+            pf_apply is_conv gl ar1.(2) ar2.(2)) then raise_notrace Exit;
+    let inj2 = match lib_ref_opt "core.eqdep_dec.inj_pair2" with
+      | None ->
+        warn_inject_no_eqdep_dec (env,ind);
+        raise_notrace Exit
+      | Some v -> v
+    in
     let new_eq_args = [|pf_get_type_of gl ar1.(3);ar1.(3);ar2.(3)|] in
-    let inj2 = lib_ref "core.eqdep_dec.inj_pair2" in
     find_scheme (!eq_dec_scheme_kind_name()) ind >>= fun c ->
     let c = if Global.is_polymorphic (ConstRef c)
       then CErrors.anomaly Pp.(str "Unexpected univ poly in inject_if_homogenous_dependent_pair")
@@ -1695,7 +1704,7 @@ let cutSubstClause l2r eqn cls =
     | Some id -> cutSubstInHyp l2r eqn id
 
 let warn_deprecated_cutrewrite =
-  CWarnings.create ~name:"deprecated-cutrewrite" ~category:CWarnings.CoreCategories.deprecated
+  CWarnings.create ~name:"deprecated-cutrewrite" ~category:Deprecation.Version.v8_5
     (fun () -> strbrk"\"cutrewrite\" is deprecated. Use \"replace\" instead.")
 
 let cutRewriteClause l2r eqn cls =
@@ -1816,7 +1825,7 @@ let subst_one dep_proof_ok x (hyp,rhs,dir) =
   let need_rewrite = not (List.is_empty dephyps) || depconcl in
   tclTHENLIST
     ((if need_rewrite then
-      [revert (List.map snd dephyps);
+      [Generalize.revert (List.map snd dephyps);
        general_rewrite ~where:None ~l2r:dir AtLeastOneOccurrence ~freeze:true ~dep:dep_proof_ok ~with_evars:false (mkVar hyp, NoBindings);
        (tclMAP (fun (dest,id) -> intro_move (Some id) dest) dephyps)]
       else
@@ -1866,7 +1875,7 @@ let default_subst_tactic_flags =
   { only_leibniz = false; rewrite_dependent_proof = true }
 
 let warn_deprecated_simple_subst =
-  CWarnings.create ~name:"deprecated-simple-subst" ~category:CWarnings.CoreCategories.deprecated
+  CWarnings.create ~name:"deprecated-simple-subst" ~category:Deprecation.Version.v8_8
     (fun () -> strbrk"\"simple subst\" is deprecated")
 
 let subst_all ?(flags=default_subst_tactic_flags) () =

@@ -40,7 +40,7 @@ let should_auto_template =
   let auto = ref true in
   let () = declare_bool_option
       { optstage = Summary.Stage.Interp;
-        optdepr  = false;
+        optdepr  = None;
         optkey   = ["Auto";"Template";"Polymorphism"];
         optread  = (fun () -> !auto);
         optwrite = (fun b -> auto := b); }
@@ -222,7 +222,7 @@ let is_flexible_sort evd s = match s with
    occur only in the le constraints *)
 
 (*
-   Solve a system of universe constraint of the form
+   Solve a system of universe constraints of the form
 
    u_s11, ..., u_s1p1, w1 <= u1
    ...
@@ -528,6 +528,14 @@ let variance_of_entry ~cumulative ~variances uctx =
       assert (lvs <= lus);
       Some (Array.append variances (Array.make (lus - lvs) None))
 
+let warn_bad_set_minimization =
+  CWarnings.create ~name:"bad-set-minimization" ~category:Deprecation.Version.v8_18
+    Pp.(fun () -> strbrk "This inductive will be minimized to Set even though Universe Minimization ToSet is unset. This will change in a future version.")
+
+let warn_bad_set_minimization ?loc () =
+  if UnivMinim.get_set_minimization () then ()
+  else warn_bad_set_minimization ?loc ()
+
 let interp_mutual_inductive_constr ~sigma ~template ~udecl ~variances ~ctx_params ~indnames ~arities ~arityconcl ~constructors ~env_ar_params ~cumulative ~poly ~private_ind ~finite =
   (* Compute renewed arities *)
   let sigma = Evd.minimize_universes sigma in
@@ -535,8 +543,18 @@ let interp_mutual_inductive_constr ~sigma ~template ~udecl ~variances ~ctx_param
   let constructors = List.map (on_snd (List.map nf)) constructors in
   let arities = List.map EConstr.(to_constr sigma) arities in
   let sigma = List.fold_left make_anonymous_conclusion_flexible sigma arityconcl in
-  let sigma, arities = inductive_levels env_ar_params sigma arities constructors in
-  let sigma = Evd.minimize_universes sigma in
+  let sigma', arities = inductive_levels env_ar_params sigma arities constructors in
+  let sigma =
+    let sigma' = Evd.minimize_universes sigma' in
+    let () = List.iter (fun ty ->
+        let _, s = Reduction.dest_arity env_ar_params ty in
+        let s = EConstr.ESorts.make s in
+        if EConstr.ESorts.is_set sigma' s && not (EConstr.ESorts.is_set sigma s)
+        then warn_bad_set_minimization ())
+        arities
+    in
+    sigma'
+  in
   let nf = Evarutil.nf_evars_universes sigma in
   let arities = List.map nf arities in
   let constructors = List.map (on_snd (List.map nf)) constructors in
@@ -721,7 +739,7 @@ let eq_params (up1,p1) (up2,p2) =
 
 let extract_coercions indl =
   let mkqid (_,({CAst.v=id},_)) = qualid_of_ident id in
-  let iscoe (coe, inst) = match inst with
+  let iscoe (_, coe, inst) = match inst with
     (* remove BackInstanceWarning after deprecation phase *)
     | Vernacexpr.(NoInstance | BackInstanceWarning) -> coe = Vernacexpr.AddCoercion
     | _ -> user_err (Pp.str "'::' not allowed in inductives.") in
@@ -811,7 +829,7 @@ let do_mutual_inductive ~template udecl indl ~cumulative ~poly ?typing_flags ~pr
   (* Declare the possible notations of inductive types *)
   List.iter (Metasyntax.add_notation_interpretation ~local:false (Global.env ())) where_notations;
   (* Declare the coercions *)
-  List.iter (fun qid -> ComCoercion.try_add_new_coercion (Nametab.locate qid) ~local:false ~poly ~nonuniform:false ~reversible:true) coercions
+  List.iter (fun qid -> ComCoercion.try_add_new_coercion (Nametab.locate qid) ~local:false ~poly ~reversible:true) coercions
 
 (** Prepare a "match" template for a given inductive type.
     For each branch of the match, we list the constructor name
@@ -857,5 +875,5 @@ module Internal =
 struct
 
 let compute_constructor_level = compute_constructor_level
-
+let warn_bad_set_minimization = warn_bad_set_minimization
 end

@@ -85,7 +85,7 @@ let make_inv_predicate env evd indf realargs id status concl =
     match status with
       | NoDep ->
           (* We push the arity and leave concl unchanged *)
-          let hyps_arity,_ = get_arity env indf in
+          let hyps_arity = get_arity env indf in
           let hyps_arity = List.map (fun d -> map_rel_decl EConstr.of_constr d) hyps_arity in
             (hyps_arity,concl)
       | Dep dflt_concl ->
@@ -291,7 +291,7 @@ let generalizeRewriteIntros as_mode tac depids id =
   let dids = dependent_hyps env id depids gl in
   let reintros = if as_mode then intros_replacing else intros_possibly_replacing in
   (tclTHENLIST
-    [bring_hyps dids; tac;
+    [Generalize.bring_hyps dids; tac;
      (* may actually fail to replace if dependent in a previous eq *)
      reintros (ids_of_named_context dids)])
   end
@@ -425,9 +425,9 @@ let rewrite_equations as_mode othin neqns names ba =
     | Some thin ->
         tclTHENLIST
             [tclDO neqns intro;
-             bring_hyps nodepids;
+             Generalize.bring_hyps nodepids;
              clear (ids_of_named_context nodepids);
-             (nLastDecls neqns (fun ctx -> bring_hyps (List.rev ctx)));
+             (nLastDecls neqns (fun ctx -> Generalize.bring_hyps (List.rev ctx)));
              (nLastDecls neqns (fun ctx -> clear (ids_of_named_context ctx)));
              tclMAP_i (true,false) neqns (fun (idopt,names) ->
                (tclTHEN
@@ -448,7 +448,7 @@ let rewrite_equations as_mode othin neqns names ba =
         else
           (tclTHENLIST
              [tclDO neqns intro;
-              bring_hyps nodepids;
+              Generalize.bring_hyps nodepids;
               clear (ids_of_named_context nodepids)])
   end
 
@@ -567,7 +567,7 @@ let invIn k names ids id =
     in
     Proofview.tclORELSE
       (tclTHENLIST
-         [bring_hyps hyps;
+         [Generalize.bring_hyps hyps;
           inversion k NoDep names id;
           intros_replace_ids])
       (wrap_inv_error id)

@@ -207,7 +207,12 @@ let wrap_error tac k =
   if is_traced () then Proofview.tclORELSE tac k else tac
 
 let wrap_error_loc loc tac k =
-  if is_traced () then Proofview.tclORELSE tac k
+  if is_traced () then
+    let k = match loc with
+      | None -> k
+      | Some loc -> fun e -> k (update_loc loc e)
+    in
+    Proofview.tclORELSE tac k
   else catch_error_loc loc tac
 
 let catch_error_tac call_trace tac =
@@ -1421,23 +1426,19 @@ and tactic_of_value ist vle =
      let numgiven = List.length givenargs in
      let info = Exninfo.reify () in
      Tacticals.tclZEROMSG ~info
-       (Pp.str tactic_nm ++ Pp.str " was not fully applied:" ++ spc() ++
-          (match numargs with
-            0 -> assert false
-          | 1 ->
-             Pp.str "There is a missing argument for variable " ++
-               (Name.print (List.hd vars))
-          | _ -> Pp.str "There are missing arguments for variables " ++
-             pr_enum Name.print vars) ++ Pp.pr_comma () ++
-          match numgiven with
-            0 ->
-              Pp.str "no arguments at all were provided."
-          | 1 ->
-             Pp.str "an argument was provided for variable " ++
-               Pp.str (List.hd givenargs) ++ Pp.str "."
-          | _ ->
-             Pp.str "arguments were provided for variables " ++
-               pr_enum Pp.str givenargs ++ Pp.str ".")
+       Pp.(str tactic_nm ++ str " was not fully applied:" ++ spc() ++
+           str "There is a missing argument for variable" ++ spc() ++ Name.print (List.hd vars) ++
+           (if numargs > 1 then
+              spc() ++ str "and " ++ int (numargs - 1) ++
+              str " more"
+            else mt()) ++ pr_comma() ++
+           (match numgiven with
+            | 0 ->
+              str "no arguments at all were provided."
+            | 1 ->
+              str "1 argument was provided."
+            | _ ->
+              int numgiven ++ str " arguments were provided."))
   | VRec _ ->
     let info = Exninfo.reify () in
     Tacticals.tclZEROMSG ~info (str "A fully applied tactic is expected.")
@@ -1781,7 +1782,7 @@ and interp_atomic ist tac : unit Proofview.tactic =
         Tacticals.tclWITHHOLES false
         (name_atomic ~env
           (TacGeneralize cl)
-          (Tactics.generalize_gen cl)) sigma
+          (Generalize.generalize_gen cl)) sigma
       end
   | TacLetTac (ev,na,c,clp,b,eqpat) ->
       Proofview.Goal.enter begin fun gl ->
@@ -1846,7 +1847,7 @@ and interp_atomic ist tac : unit Proofview.tactic =
         Tacticals.tclTHEN (Proofview.Unsafe.tclEVARS sigma)
         (name_atomic ~env
           (TacInductionDestruct(isrec,ev,(lp,el)))
-            (Tactics.induction_destruct isrec ev (l,el)))
+            (Induction.induction_destruct isrec ev (l,el)))
       end
 
   (* Conversion *)
@@ -2206,7 +2207,7 @@ let () =
   let open Goptions in
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Ltac";"Debug"];
       optread  = (fun () -> get_debug () != Tactic_debug.DebugOff);
       optwrite = vernac_debug }
@@ -2215,7 +2216,7 @@ let () =
   let open Goptions in
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Ltac"; "Backtrace"];
       optread  = (fun () -> !log_trace);
       optwrite = (fun b -> log_trace := b) }

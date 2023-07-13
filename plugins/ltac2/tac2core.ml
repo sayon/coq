@@ -43,6 +43,18 @@ let open_constr_no_classes_flags =
   polymorphic = false;
   }
 
+let preterm_flags =
+  let open Pretyping in
+  {
+  use_coercions = true;
+  use_typeclasses = Pretyping.NoUseTC;
+  solve_unification_constraints = true;
+  fail_evar = false;
+  expand_evars = false;
+  program_mode = false;
+  polymorphic = false;
+  }
+
 (** Standard values *)
 
 module Value = Tac2ffi
@@ -173,7 +185,7 @@ let has_fatal_flag info = match Exninfo.get info fatal_flag with
 let set_bt info =
   if !Tac2bt.print_ltac2_backtrace then
     Tac2bt.get_backtrace >>= fun bt ->
-    Proofview.tclUNIT (Exninfo.add info Tac2entries.backtrace bt)
+    Proofview.tclUNIT (Exninfo.add info Tac2bt.backtrace bt)
   else Proofview.tclUNIT info
 
 let throw ?(info = Exninfo.null) e =
@@ -430,8 +442,8 @@ let () = define1 "ident_to_string" ident begin fun id ->
 end
 
 let () = define1 "ident_of_string" string begin fun s ->
-  let id = try Some (Id.of_string s) with _ -> None in
-  return (Value.of_option Value.of_ident id)
+    let id = try Some (Id.of_string s) with e when CErrors.noncritical e -> None in
+    return (Value.of_option Value.of_ident id)
 end
 
 (** Int *)
@@ -1146,7 +1158,7 @@ let () = define1 "progress" closure begin fun f ->
 end
 
 let () = define2 "abstract" (option ident) closure begin fun id f ->
-  Abstract.tclABSTRACT id (Proofview.tclIGNORE (thaw f)) >>= fun () ->
+    Abstract.tclABSTRACT id (Proofview.tclIGNORE (thaw f)) >>= fun () ->
   return v_unit
 end
 
@@ -1641,8 +1653,12 @@ let intern_constr self ist c =
   let (_, (c, _)) = Genintern.intern Stdarg.wit_constr ist c in
   let v = match DAst.get c with
     | GGenarg (GenArg (Glbwit tag, v)) ->
-      begin match genarg_type_eq tag wit_ltac2_quotation with
-      | Some Refl -> GlbTacexpr (GTacVar v)
+      begin match genarg_type_eq tag wit_ltac2_var_quotation with
+      | Some Refl ->
+        begin match (fst v) with
+        | ConstrVar -> GlbTacexpr (GTacVar (snd v))
+        | _ -> GlbVal c
+        end
       | None -> GlbVal c
       end
     | _ -> GlbVal c
@@ -1810,8 +1826,7 @@ let () =
       let ist = Ltac_plugin.Tacinterp.default_ist () in
       let ist = { ist with Geninterp.lfun = lfun } in
       let tac = (Ltac_plugin.Tacinterp.eval_tactic_ist ist tac : unit Proofview.tactic) in
-      let wrap (e, info) = set_bt info >>= fun info -> Proofview.tclZERO ~info e in
-      Proofview.tclOR tac wrap >>= fun () ->
+      tac >>= fun () ->
       return v_unit
     in
     let len = List.length ids in
@@ -1904,32 +1919,72 @@ let () =
   in
   GlobEnv.register_constr_interp0 wit_ltac2_constr interp
 
-let () =
-  let interp ?loc ~poly env sigma tycon id =
-    let ist = Tac2interp.get_env @@ GlobEnv.lfun env in
-    let env = GlobEnv.renamed_env env in
-    let c = Id.Map.find id ist.env_ist in
-    let c = Value.to_constr c in
-    let t = Retyping.get_type_of env sigma c in
-    let j = { Environ.uj_val = c; uj_type = t } in
-    match tycon with
-    | None ->
-      j, sigma
-    | Some ty ->
-      let sigma =
-        try Evarconv.unify_leq_delay env sigma t ty
-        with Evarconv.UnableToUnify (sigma,e) ->
-          Pretype_errors.error_actual_type ?loc env sigma j ty e
-      in
-      {j with Environ.uj_type = ty}, sigma
+let interp_constr_var_as_constr ?loc env sigma tycon id =
+  let ist = Tac2interp.get_env @@ GlobEnv.lfun env in
+  let env = GlobEnv.renamed_env env in
+  let c = Id.Map.find id ist.env_ist in
+  let c = Value.to_constr c in
+  let t = Retyping.get_type_of env sigma c in
+  let j = { Environ.uj_val = c; uj_type = t } in
+  match tycon with
+  | None ->
+    j, sigma
+  | Some ty ->
+    let sigma =
+      try Evarconv.unify_leq_delay env sigma t ty
+      with Evarconv.UnableToUnify (sigma,e) ->
+        Pretype_errors.error_actual_type ?loc env sigma j ty e
+    in
+    {j with Environ.uj_type = ty}, sigma
+
+let interp_preterm_var_as_constr ?loc env sigma tycon id =
+  let open Ltac_pretype in
+  let ist = Tac2interp.get_env @@ GlobEnv.lfun env in
+  let env = GlobEnv.renamed_env env in
+  let c = Id.Map.find id ist.env_ist in
+  let {closure; term} = Value.to_ext Value.val_preterm c in
+  let vars = {
+    ltac_constrs = closure.typed;
+    ltac_uconstrs = closure.untyped;
+    ltac_idents = closure.idents;
+    ltac_genargs = closure.genargs;
+  }
   in
-  GlobEnv.register_constr_interp0 wit_ltac2_quotation interp
+  let flags = preterm_flags in
+  let tycon = let open Pretyping in match tycon with
+    | Some ty -> OfType ty
+    | None -> WithoutTypeConstraint
+  in
+  let sigma, t, ty = Pretyping.understand_ltac_ty flags env sigma vars tycon term in
+  Environ.make_judge t ty, sigma
 
 let () =
-  let pr_raw id = Genprint.PrinterBasic (fun _env _sigma -> assert false) in
-  let pr_glb id = Genprint.PrinterBasic (fun _env _sigma -> str "$" ++ Id.print id) in
+  let interp ?loc ~poly env sigma tycon (kind,id) =
+    let f = match kind with
+      | ConstrVar -> interp_constr_var_as_constr
+      | PretermVar -> interp_preterm_var_as_constr
+    in
+    f ?loc env sigma tycon id
+  in
+  GlobEnv.register_constr_interp0 wit_ltac2_var_quotation interp
+
+let () =
+  let pr_raw (kind,id) = Genprint.PrinterBasic (fun _env _sigma ->
+      let ppkind =
+      match kind with
+        | None -> mt()
+        | Some kind -> Id.print kind.CAst.v ++ str ":"
+      in
+      str "$" ++ ppkind ++ Id.print id.CAst.v)
+  in
+  let pr_glb (kind,id) = Genprint.PrinterBasic (fun _env _sigma ->
+      let ppkind = match kind with
+        | ConstrVar -> mt()
+        | PretermVar -> str "preterm:"
+      in
+      str "$" ++ ppkind ++ Id.print id) in
   let pr_top x = Util.Empty.abort x in
-  Genprint.register_print0 wit_ltac2_quotation pr_raw pr_glb pr_top
+  Genprint.register_print0 wit_ltac2_var_quotation pr_raw pr_glb pr_top
 
 let () =
   let subs avoid globs (ids, tac) =
@@ -1957,13 +2012,21 @@ let () =
 (** Ltac2 in Ltac1 *)
 
 let () =
-  let e = Tac2entries.Pltac.tac2expr_in_env in
-  let inject (loc, v) = Ltac_plugin.Tacexpr.TacGeneric (Some "ltac2", in_gen (rawwit wit_ltac2) v) in
-  Ltac_plugin.Tacentries.create_ltac_quotation ~plugin:ltac2_plugin "ltac2" inject (e, None)
+  let create name wit =
+    let e = Tac2entries.Pltac.tac2expr_in_env in
+    let inject (loc, v) = Ltac_plugin.Tacexpr.TacGeneric (Some name, in_gen (rawwit wit) v) in
+    Ltac_plugin.Tacentries.create_ltac_quotation ~plugin:ltac2_plugin name inject (e, None)
+  in
+  let () = create "ltac2" wit_ltac2in1 in
+  let () = create "ltac2val" wit_ltac2in1_val in
+  ()
 
 (* Ltac1 runtime representation of Ltac2 closures. *)
 let typ_ltac2 : valexpr Geninterp.Val.typ =
   Geninterp.Val.create "ltac2:ltac2_eval"
+
+let () = Genprint.register_val_print0 typ_ltac2 (fun v ->
+    TopPrinterBasic (fun () -> Pp.str "<ltac2 closure>"))
 
 let cast_typ (type a) (tag : a Geninterp.Val.typ) (v : Geninterp.Val.t) : a =
   let Geninterp.Val.Dyn (tag', v) = v in
@@ -2027,8 +2090,9 @@ let () =
     let idtac = Value.of_closure { ist with lfun = Id.Map.empty }
         (CAst.make (Tacexpr.TacId [])) in
     let ist = { env_ist = Id.Map.empty } in
-    Tac2interp.interp ist tac >>= fun _ ->
-    Ftactic.return idtac
+    Tac2interp.interp ist tac >>= fun v ->
+    let v = idtac in
+    Ftactic.return v
   | _ :: _ ->
     (* Return a closure [@f := {blob} |- fun ids => ltac2_eval(f, ids) ] *)
     (* This name cannot clash with Ltac2 variables which are all lowercase *)
@@ -2044,7 +2108,16 @@ let () =
     let ist = { ist with lfun = Id.Map.singleton self_id self } in
     Ftactic.return (Value.of_closure ist clos)
   in
-  Geninterp.register_interp0 wit_ltac2 interp
+  Geninterp.register_interp0 wit_ltac2in1 interp
+
+let () =
+  let interp ist tac =
+    let ist = { env_ist = Id.Map.empty } in
+    Tac2interp.interp ist tac >>= fun v ->
+    let v = repr_to ltac1 v in
+    Ftactic.return v
+  in
+  Geninterp.register_interp0 wit_ltac2in1_val interp
 
 let () =
   let pr_raw _ = Genprint.PrinterBasic (fun _env _sigma -> assert false) in
@@ -2056,7 +2129,7 @@ let () =
     Genprint.PrinterBasic Pp.(fun _env _sigma -> ids ++ Tac2print.pr_glbexpr e)
   in
   let pr_top x = Util.Empty.abort x in
-  Genprint.register_print0 wit_ltac2 pr_raw pr_glb pr_top
+  Genprint.register_print0 wit_ltac2in1 pr_raw pr_glb pr_top
 
 let () =
   let pr_raw _ = Genprint.PrinterBasic (fun _env _sigma -> assert false) in

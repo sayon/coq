@@ -42,12 +42,11 @@ type subst0 =
 module RelDecl = Context.Rel.Declaration
 module NamedDecl = Context.Named.Declaration
 
-let is_keyed_unification =
+let { Goptions.get = is_keyed_unification } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Keyed";"Unification"]
     ~value:false
+    ()
 
 let debug_tactic_unification = CDebug.create ~name:"tactic-unification" ()
 
@@ -557,17 +556,6 @@ let is_rigid_head sigma flags t =
     | Lambda _ | LetIn _ | App (_, _) | Case _
     | Proj (_, _) -> false (* Why aren't Prod, Sort rigid heads ? *)
 
-let force_eqs c =
-  let open UnivProblem in
-  Set.fold
-    (fun c acc ->
-       let c' = match c with
-         | ULub (l, r) -> UEq (Sorts.sort_of_univ @@ Univ.Universe.make l, Sorts.sort_of_univ @@ Univ.Universe.make r)
-         | ULe _ | UEq _ | UWeak _ -> c
-       in
-        Set.add c' acc)
-    c Set.empty
-
 let constr_cmp pb env sigma flags ?nargs t u =
   let cstrs =
     if pb == Conversion.CONV then EConstr.eq_constr_universes env sigma ?nargs t u
@@ -579,7 +567,7 @@ let constr_cmp pb env sigma flags ?nargs t u =
       with UGraph.UniverseInconsistency _ -> None
       | Evd.UniversesDiffer ->
         if is_rigid_head sigma flags t then
-          try Some (Evd.add_universe_constraints sigma (force_eqs cstrs))
+          try Some (Evd.add_universe_constraints sigma (UnivProblem.Set.force cstrs))
           with UGraph.UniverseInconsistency _ -> None
         else None
       end

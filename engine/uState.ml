@@ -121,6 +121,10 @@ let unify_quality ~fail c q1 q2 local = match q1, q2 with
 | (QSProp, (QType | QProp)) -> fail ()
 | (QProp, QSProp) -> fail ()
 
+let nf_quality m = function
+  | QSProp | QProp | QType as q -> q
+  | QVar q -> repr q m
+
 let union ~fail s1 s2 =
   let extra = ref [] in
   let qmap = QMap.union (fun qk q1 q2 ->
@@ -140,7 +144,11 @@ let union ~fail s1 s2 =
   in
   let above = QSet.filter filter @@ QSet.union s1.above s2.above in
   let s = { qmap; above } in
-  List.fold_left (fun s (q1,q2) -> unify_quality ~fail:(fun () -> fail s q1 q2) CONV q1 q2 s) s extra
+  List.fold_left (fun s (q1,q2) ->
+      let q1 = nf_quality s q1 and q2 = nf_quality s q2 in
+      unify_quality ~fail:(fun () -> fail s q1 q2) CONV q1 q2 s)
+    s
+    extra
 
 let add q m = { qmap = QMap.add q None m.qmap; above = m.above }
 
@@ -203,7 +211,7 @@ let make ~lbound univs =
   { empty with
     universes = univs;
     universes_lbound = lbound;
-    initial_universes = univs}
+    initial_universes = univs }
 
 let is_empty uctx =
   ContextSet.is_empty uctx.local &&
@@ -326,12 +334,11 @@ let instantiate_variable l (b : Universe.t) v =
 
 exception UniversesDiffer
 
-let drop_weak_constraints =
+let { Goptions.get = drop_weak_constraints } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Cumulativity";"Weak";"Constraints"]
     ~value:false
+    ()
 
 let level_inconsistency cst l r =
   let mk u = Sorts.sort_of_univ @@ Universe.make u in
@@ -938,12 +945,12 @@ let new_univ_variable ?loc rigid name uctx =
 
 let add_global_univ uctx u = add_universe None true UGraph.Bound.Set uctx u
 
-let make_with_initial_binders ~lbound univs us =
+let make_with_initial_binders ~lbound univs binders =
   let uctx = make ~lbound univs in
   List.fold_left
     (fun uctx { CAst.loc; v = id } ->
        fst (new_univ_variable ?loc univ_rigid (Some id) uctx))
-    uctx us
+    uctx binders
 
 let from_env ?(binders=[]) env =
   make_with_initial_binders ~lbound:(Environ.universes_lbound env) (Environ.universes env) binders
@@ -1001,22 +1008,15 @@ let is_sort_variable uctx s =
 let subst_univs_context_with_def def usubst (uctx, cst) =
   (Level.Set.diff uctx def, UnivSubst.subst_univs_constraints usubst cst)
 
-let refresh_constraints univs (ctx, cstrs) =
-  let cstrs', univs' =
-    Constraints.fold (fun c (cstrs', univs) ->
-      (Constraints.add c cstrs', UGraph.enforce_constraint c univs))
-      cstrs (Constraints.empty, univs)
-  in ((ctx, cstrs'), univs')
-
 let normalize_variables uctx =
   let normalized_variables, def, subst =
     UnivSubst.normalize_univ_variables uctx.univ_variables
   in
   let make_subst subst l = Level.Map.find_opt l subst in
   let uctx_local = subst_univs_context_with_def def (make_subst subst) uctx.local in
-  let uctx_local', univs = refresh_constraints uctx.initial_universes uctx_local in
+  let univs = UGraph.merge_constraints (snd uctx_local) uctx.initial_universes in
   { uctx with
-    local = uctx_local';
+    local = uctx_local;
     univ_variables = normalized_variables;
     universes = univs }
 
@@ -1052,9 +1052,7 @@ let minimize uctx =
   in
   if ContextSet.equal us' uctx.local then uctx
   else
-    let us', universes =
-      refresh_constraints uctx.initial_universes us'
-    in
+    let universes = UGraph.merge_constraints (snd us') uctx.initial_universes in
       { names = uctx.names;
         local = us';
         seff_univs = uctx.seff_univs; (* not sure about this *)

@@ -525,7 +525,7 @@ record_definition: [
 ]
 
 record_field: [
-| LIST0 ( "#[" LIST0 attribute SEP "," "]" ) name OPT field_spec OPT [ "|" natural ]
+| LIST0 [ "#[" LIST0 attribute SEP "," "]" ] name OPT field_spec OPT [ "|" natural ]
 ]
 
 field_spec: [
@@ -551,7 +551,7 @@ inductive_definition: [
 ]
 
 constructor: [
-| ident LIST0 binder OPT of_type_inst
+| LIST0 [ "#[" LIST0 attribute SEP "," "]" ] ident LIST0 binder OPT of_type_inst
 ]
 
 import_categories: [
@@ -720,9 +720,6 @@ command: [
 | "Locate" "Ltac" qualid
 | "Locate" "Library" qualid
 | "Locate" "File" string
-| "Add" "LoadPath" string "as" dirpath
-| "Add" "Rec" "LoadPath" string "as" dirpath
-| "Remove" "LoadPath" string
 | "Type" term
 | "Print" "All"
 | "Print" "Section" qualid
@@ -764,7 +761,6 @@ command: [
 | "Print" "Module" qualid
 | "Print" "Namespace" dirpath
 | "Inspect" natural
-| "Add" "ML" "Path" string
 | "Print" "Table" setting_name
 | "Add" setting_name LIST1 [ qualid | string ]
 | "Test" setting_name OPT ( "for" LIST1 [ qualid | string ] )
@@ -818,6 +814,7 @@ command: [
 | "Show" "Intros"
 | "Show" "Match" qualid
 | "Guarded"
+| "Validate" "Proof"
 | "Create" "HintDb" ident OPT "discriminated"
 | "Remove" "Hints" LIST1 qualid OPT ( ":" LIST1 ident )
 | "Comments" LIST0 [ one_term | string | natural ]

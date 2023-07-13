@@ -268,6 +268,11 @@ project aac_tactics "https://github.com/coq-community/aac-tactics" "master"
 project paco "https://github.com/snu-sf/paco" "master"
 
 ########################################################################
+# coq-itree
+########################################################################
+project itree "https://github.com/DeepSpec/InteractionTrees" "master"
+
+########################################################################
 # paramcoq
 ########################################################################
 project paramcoq "https://github.com/coq-community/paramcoq" "master"
@@ -301,6 +306,11 @@ project stdlib2 "https://github.com/coq/stdlib2" "master"
 project argosy "https://github.com/mit-pdos/argosy" "master"
 
 ########################################################################
+# ATBR
+########################################################################
+project atbr "https://github.com/coq-community/atbr" "master"
+
+########################################################################
 # perennial
 ########################################################################
 project perennial "https://github.com/mit-pdos/perennial" "coq/tested"
@@ -324,6 +334,11 @@ project coqtail "https://github.com/whonore/Coqtail" "master"
 # Deriving
 ########################################################################
 project deriving "https://github.com/arthuraa/deriving" "master"
+
+########################################################################
+# VsCoq
+########################################################################
+project vscoq "https://github.com/coq-community/vscoq" "main"
 
 ########################################################################
 # category-theory
@@ -374,3 +389,8 @@ project coq_library_undecidability "https://github.com/uds-psl/coq-library-undec
 # Tactician
 ########################################################################
 project tactician "https://github.com/coq-tactician/coq-tactician" "coqdev"
+
+########################################################################
+# Ltac2 compiler
+########################################################################
+project ltac2_compiler "https://github.com/SkySkimmer/coq-ltac2-compiler" "main"

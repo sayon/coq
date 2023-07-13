@@ -104,6 +104,12 @@ let interp_control_entry ~loc (f : control_entry) ~st
   | ControlRedirect s ->
     Topfmt.with_output_to_file s (fun () -> fn ~st) ()
 
+let deprecated_nonuniform =
+  CWarnings.create ~name:"deprecated-nonuniform-attribute"
+    ~category:Deprecation.Version.v8_18
+    Pp.(fun () -> strbrk "Attribute '#[nonuniform]' is deprecated, \
+                          use '#[warning=\"-uniform-inheritance\"]' instead.")
+
 let warnings_att =
   Attributes.attribute_of_list [
     "warnings", Attributes.payload_parser ~cat:(^) ~name:"warnings";
@@ -112,9 +118,17 @@ let warnings_att =
 
 let with_generic_atts atts f =
   let atts, warnings = Attributes.parse_with_extra warnings_att atts in
+  let atts, nonuniform = Attributes.parse_with_extra ComCoercion.nonuniform atts in
+  let warnings =
+    let () = if nonuniform <> None then deprecated_nonuniform () in
+    if nonuniform <> Some true then warnings else
+      let ui = "-uniform-inheritance" in
+      Some (match warnings with Some w -> w ^ "," ^ ui | None -> ui) in
   match warnings with
   | None -> f ~atts
-  | Some warnings -> CWarnings.with_warn warnings (fun () -> f ~atts) ()
+  | Some warnings ->
+    CWarnings.check_unknown_warnings warnings;
+    CWarnings.with_warn warnings (fun () -> f ~atts) ()
 
 (* "locality" is the prefix "Local" attribute, while the "local" component
  * is the outdated/deprecated "Local" attribute of some vernacular commands
@@ -146,7 +160,7 @@ let rec interp_expr ?loc ~atts ~st c =
 
 and vernac_load ~verbosely entries =
   (* Note that no proof should be open here, so the state here is just token for now *)
-  let st = Vernacstate.freeze_full_state ~marshallable:false in
+  let st = Vernacstate.freeze_full_state () in
   let v_mod = if verbosely then Flags.verbosely else Flags.silently in
   let interp_entry (stack, pm) (CAst.{ loc; v = cmd }, synterp_st) =
     Vernacstate.Synterp.unfreeze synterp_st;
@@ -215,7 +229,7 @@ let interp_gen ~verbosely ~st ~interp_fn cmd =
     let v_mod = if verbosely then Flags.verbosely else Flags.silently in
     let ontop = v_mod (interp_fn ~st) cmd in
     Vernacstate.Declare.set ontop [@ocaml.warning "-3"];
-    Vernacstate.Interp.freeze_interp_state ~marshallable:false
+    Vernacstate.Interp.freeze_interp_state ()
   with exn ->
     let exn = Exninfo.capture exn in
     let exn = locate_if_not_already ?loc:cmd.CAst.loc exn in
@@ -228,7 +242,7 @@ let interp ?(verbosely=true) ~st cmd =
   vernac_pperr_endline Pp.(fun () -> str "interpreting: " ++ Ppvernac.pr_vernac_expr cmd.CAst.v.expr);
   let entry = Synterp.synterp_control cmd in
   let interp = interp_gen ~verbosely ~st ~interp_fn:interp_control entry in
-  Vernacstate.{ synterp = Vernacstate.Synterp.freeze ~marshallable:false; interp }
+  Vernacstate.{ synterp = Vernacstate.Synterp.freeze (); interp }
 
 let interp_entry ?(verbosely=true) ~st entry =
   Vernacstate.unfreeze_full_state st;

@@ -532,6 +532,11 @@ file is a particular case of a module called a *library file*.
 .. cmd:: {? From @dirpath } Require {? {| Import | Export } {? @import_categories } } {+ @filtered_import }
    :name: From … Require; Require; Require Import; Require Export
 
+   .. insertprodn dirpath dirpath
+
+   .. prodn::
+      dirpath ::= {* @ident . } @ident
+
    Loads compiled files into the Coq environment. For the first
    :n:`@qualid` in each :n:`@filtered_import`, the command looks in the
    :term:`load path` for a compiled file :n:`@ident.vo` whose
@@ -705,60 +710,20 @@ file is a particular case of a module called a *library file*.
 Load paths
 ----------
 
-:term:`Load paths <load path>` are preferably managed using Coq command line options (see
-Section :ref:`logical-paths-load-path`), but there are also commands
-to manage them within Coq. These commands are only meant to be issued in
-the toplevel, and using them in source files is discouraged.
+.. versionchanged:: 8.18
 
+   Commands to manage :term:`load paths <load path>` within Coq have been
+   removed. Load paths can be managed using Coq command line options or
+   enviroment variables (see :ref:`logical-paths-load-path`).
 
 .. cmd:: Pwd
 
    This command displays the current working directory.
 
-
 .. cmd:: Cd {? @string }
 
    If :n:`@string` is specified, changes the current directory according to :token:`string` which
    can be any valid path.  Otherwise, it displays the current directory.
-
-
-.. cmd:: Add LoadPath @string as @dirpath
-
-   .. deprecated:: 8.16
-
-      Use command line `-Q` or `-R` or put them in your `_CoqProject` file instead.
-
-      If this command is an important feature for you, please open an
-      issue at https://github.com/coq/coq/issues and explain your
-      workflow.
-
-   .. insertprodn dirpath dirpath
-
-   .. prodn::
-      dirpath ::= {* @ident . } @ident
-
-   This command is equivalent to the command line option
-   :n:`-Q @string @dirpath`. It adds a mapping to the :term:`load path` from
-   the logical name :n:`@dirpath` to the file system directory :n:`@string`.
-
-   * :n:`@dirpath` is a prefix of a module name.  The module name hierarchy
-     follows the file system hierarchy.  On Linux, for example, the prefix
-     `A.B.C` maps to the directory :n:`@string/B/C`.  Avoid using spaces after a `.` in the
-     path because the parser will interpret that as the end of a command or tactic.
-
-.. cmd:: Add Rec LoadPath @string as @dirpath
-
-   .. deprecated:: 8.16
-
-   This command is equivalent to the command line option
-   :n:`-R @string @dirpath`. It adds the directory specified by the
-   :n:`@string`` and all its subdirectories to the current Coq :term:`load path`.
-
-
-.. cmd:: Remove LoadPath @string
-
-   This command removes the path :n:`@string` from the current Coq :term:`load path`.
-
 
 .. cmd:: Print LoadPath {? @dirpath }
 
@@ -766,22 +731,11 @@ the toplevel, and using them in source files is discouraged.
    displays only the paths that extend that prefix.  In the output,
    the logical path `<>` represents an empty logical path.
 
-
-.. cmd:: Add ML Path @string
-
-   Equivalent to the :ref:`command line option <command-line-options>`
-   :n:`-I @string`.  Adds the path :n:`@string` to the current OCaml
-   loadpath (cf. :cmd:`Declare ML Module`). It is for
-   convenience, such as for use in an interactive session, and it
-   is not exported to compiled files. For separation of concerns with
-   respect to the relocability of files, we recommend using
-   :n:`-I @string`.
-
 .. cmd:: Print ML Path
 
-   Displays the current OCaml loadpath, as provided by
-   the :ref:`command line option <command-line-options>` :n:`-I @string` or by the command :cmd:`Add
-   ML Path` `@string` (cf. :cmd:`Declare ML Module`).
+   Displays the current OCaml loadpath, as provided by the
+   :ref:`command line option <command-line-options>` :n:`-I @string`
+   (cf. :cmd:`Declare ML Module`).
 
 .. _extra_dependencies:
 
@@ -967,13 +921,47 @@ Controlling display
 
 .. opt:: Warnings "{+, {? {| - | + } } @ident }"
 
-   This :term:`option` configures the display of warnings. It is experimental, and
-   expects, between quotes, a comma-separated list of warning names or
-   categories. Adding - in front of a warning or category disables it, adding +
-   makes it an error. It is possible to use the special categories all and
-   default, the latter containing the warnings enabled by default. The flags are
+   This :term:`option` configures the display of warnings. The :n:`@ident`\s
+   are warning or category names. Adding `-` in front of a warning or category
+   disables it, adding `+` makes it an error.
+
+   Warning name and categories are printed between brackets when the warning
+   is displayed (the warning name appears first). Warnings can belong to
+   multiple categories. The special category `all` contains all warnings, and
+   the special category `default` contains the warnings enabled by default.
+
+   Coq defines a set of core warning categories, which may be extended by
+   plugins, so this list is not exhaustive. The core categories are:
+   `automation`,
+   `bytecode-compiler`,
+   `coercions`,
+   `deprecated`,
+   `extraction`,
+   `filesystem`,
+   `fixpoints`,
+   `fragile`,
+   `funind`,
+   `implicits`,
+   `ltac`,
+   `ltac2`,
+   `native-compiler`,
+   `numbers`,
+   `parsing`,
+   `pedantic`,
+   `records`,
+   `ssr`,
+   `syntax`,
+   `tactics`,
+   `vernacular`.
+
+   .. This list is from lib/cWarnings.ml
+
+   The flags are
    interpreted from left to right, so in case of an overlap, the flags on the
    right have higher priority, meaning that `A,-A` is equivalent to `-A`.
+
+   See also the :attr:`warnings` attribute, which can be used to
+   configure the display of warnings for a single command.
 
 .. opt:: Debug "{+, {? - } @ident }"
 

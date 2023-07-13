@@ -623,6 +623,10 @@ We have a linter that checks a few different things:
   won't do that for you, although it should detect in most cases if you
   have forgotten to add documentation for your new command or tactic,
   or if the documentation is not consistent with the parser.
+- **.opam files are up to date**. Coq's `*.opam` files are generated
+  automatically from metadata in `dune-project`. If the meta-data
+  becomes out of sync, the linter will complain. This can be fixed
+  doing `dune build *.opam` at the root of Coq's repository.
 
 You may run the linter yourself with `dev/lint-repository.sh`.
 
@@ -915,9 +919,7 @@ organization, because of a limitation of GitHub).
   (see also Section [Release management](#release-management)).
 
 - To know which files you are a maintainer of, you can look for black
-  shields icons in the "Files changed" tab.  Alternatively, you may
-  use the [`dev/tools/check-owners-pr.sh`][check-owners] script for
-  the same purpose.
+  shields icons in the "Files changed" tab.
 
   ![shield icon](dev/doc/shield-icon.png)
 
@@ -1326,7 +1328,6 @@ can be found [on the wiki][wiki-CUDW].
 [Awesome-Coq]: https://github.com/coq-community/awesome-coq
 [Benchmarking]: https://github.com/coq/coq/wiki/Benchmarking
 [CEP]: https://github.com/coq/ceps
-[check-owners]: dev/tools/check-owners-pr.sh
 [CI-README-developers]: dev/ci/README-developers.md
 [CI-README-users]: dev/ci/README-users.md
 [Code-of-Conduct]: CODE_OF_CONDUCT.md

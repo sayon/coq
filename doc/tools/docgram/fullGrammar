@@ -520,6 +520,7 @@ command: [
 | "Show" "Intros"
 | "Show" "Match" reference
 | "Guarded"
+| "Validate" "Proof"
 | "Create" "HintDb" IDENT; [ "discriminated" | ]
 | "Remove" "Hints" LIST1 global opt_hintbases
 | "Hint" hint opt_hintbases
@@ -532,9 +533,6 @@ command: [
 | "Load" [ "Verbose" | ] [ ne_string | IDENT ]
 | "Declare" "ML" "Module" LIST1 ne_string
 | "Locate" locatable
-| "Add" "LoadPath" ne_string "as" dirpath
-| "Add" "Rec" "LoadPath" ne_string "as" dirpath
-| "Remove" "LoadPath" ne_string
 | "Type" lconstr
 | "Print" printable
 | "Print" smart_global OPT univ_name_list
@@ -542,7 +540,6 @@ command: [
 | "Print" "Module" global
 | "Print" "Namespace" dirpath
 | "Inspect" natural
-| "Add" "ML" "Path" ne_string
 | "Set" setting_name option_setting
 | "Unset" setting_name
 | "Print" "Table" setting_name
@@ -739,11 +736,11 @@ vernac_control: [
 ]
 
 decorated_vernac: [
-| LIST0 quoted_attributes vernac
+| quoted_attributes vernac
 ]
 
 quoted_attributes: [
-| "#[" attribute_list "]"
+| LIST0 [ "#[" attribute_list "]" ]
 ]
 
 attribute_list: [
@@ -931,6 +928,7 @@ decl_notations: [
 
 opt_constructors_or_fields: [
 | ":=" constructors_or_record
+| ":="
 |
 ]
 
@@ -940,11 +938,10 @@ inductive_or_record_definition: [
 
 constructors_or_record: [
 | "|" LIST1 constructor SEP "|"
-| identref constructor_type "|" LIST1 constructor SEP "|"
-| identref constructor_type
-| identref "{" record_fields "}" default_inhabitant_ident
+| quoted_attributes identref constructor_type "|" LIST1 constructor SEP "|"
+| quoted_attributes identref constructor_type
+| quoted_attributes identref "{" record_fields "}" default_inhabitant_ident
 | "{" record_fields "}" default_inhabitant_ident
-|
 ]
 
 default_inhabitant_ident: [
@@ -982,7 +979,7 @@ scheme_type: [
 ]
 
 record_field: [
-| LIST0 quoted_attributes record_binder OPT [ "|" natural ] decl_notations
+| quoted_attributes record_binder OPT [ "|" natural ] decl_notations
 ]
 
 record_fields: [
@@ -1020,7 +1017,7 @@ constructor_type: [
 ]
 
 constructor: [
-| identref constructor_type
+| quoted_attributes identref constructor_type
 ]
 
 of_type: [

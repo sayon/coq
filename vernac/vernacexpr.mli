@@ -190,7 +190,7 @@ type inductive_kind = Inductive_kw | CoInductive | Variant | Record | Structure 
 type simple_binder = lident list  * constr_expr
 type class_binder = lident * constr_expr list
 type 'a with_coercion = coercion_flag * 'a
-type 'a with_coercion_instance = (coercion_flag * instance_flag) * 'a
+type 'a with_coercion_instance = (Attributes.vernac_flags * coercion_flag * instance_flag) * 'a
 (* Attributes of a record field declaration *)
 type record_field_attr = {
   rf_coercion: coercion_flag; (* the projection is an implicit coercion *)
@@ -201,10 +201,18 @@ type record_field_attr = {
   rf_notation: notation_declaration list;
   rf_canonical: bool; (* use this projection in the search for canonical instances *)
   }
+(* Same before parsing the attributes *)
+type record_field_attr_unparsed = {
+  rfu_attrs: Attributes.vernac_flags;
+  rfu_coercion: coercion_flag;
+  rfu_instance: instance_flag;
+  rfu_priority: int option;
+  rfu_notation: notation_declaration list;
+  }
 type constructor_expr = (lident * constr_expr) with_coercion_instance
 type constructor_list_or_record_decl_expr =
   | Constructors of constructor_expr list
-  | RecordDecl of lident option * (local_decl_expr * record_field_attr) list * lident option
+  | RecordDecl of lident option * (local_decl_expr * record_field_attr_unparsed) list * lident option
 type inductive_params_expr = local_binder_expr list * local_binder_expr list option
 (** If the option is nonempty the "|" marker was used *)
 
@@ -366,13 +374,6 @@ type synterp_vernac_expr =
   | VernacInclude of module_ast_inl list
 
   (* Auxiliary file and library management *)
-  | VernacAddLoadPath of { implicit : bool
-                         ; physical_path : CUnix.physical_path
-                         ; logical_path : DirPath.t
-                         }
-
-  | VernacRemoveLoadPath of string
-  | VernacAddMLPath of string
   | VernacDeclareMLModule of string list
   | VernacChdir of string option
   | VernacExtraDependency of qualid * string * Id.t option
@@ -486,6 +487,7 @@ type nonrec synpure_vernac_expr =
   | VernacEndSubproof
   | VernacShow of showable
   | VernacCheckGuard
+  | VernacValidateProof
   | VernacProof of Genarg.raw_generic_argument option * section_subset_expr option
 
   | VernacAddOption of Goptions.option_name * Goptions.table_value list

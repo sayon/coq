@@ -5,8 +5,7 @@
 (formatting
  (enabled_for ocaml))
 
-; After Dune 2.8 we can use this, but let's wait for the build consolidation PR
-; (generate_opam_files true)
+(generate_opam_files true)
 
 (license LGPL-2.1-only)
 (maintainers "The Coq development team <coqdev@inria.fr>")
@@ -84,7 +83,11 @@ structured way."))
 (package
  (name coqide)
  (depends
+  (ocamlfind :build)
+  (conf-findutils :build)
+  conf-adwaita-icon-theme
   (coqide-server (= :version))
+  (cairo2 (>= 0.6.4))
   (lablgtk3-sourceview3 (>= 3.1.2)))
  (synopsis "The Coq Proof Assistant --- GTK3 IDE")
  (description "Coq is a formal proof management system. It provides

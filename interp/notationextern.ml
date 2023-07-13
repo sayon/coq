@@ -20,10 +20,34 @@ open Notation_term
 open Glob_term
 (*i*)
 
-let notation_entry_level_eq s1 s2 = match (s1,s2) with
-| InConstrEntrySomeLevel, InConstrEntrySomeLevel -> true
-| InCustomEntryLevel (s1,n1), InCustomEntryLevel (s2,n2) -> String.equal s1 s2 && n1 = n2
-| (InConstrEntrySomeLevel | InCustomEntryLevel _), _ -> false
+let notation_with_optional_scope_eq inscope1 inscope2 = match (inscope1,inscope2) with
+  | LastLonelyNotation, LastLonelyNotation -> true
+  | NotationInScope s1, NotationInScope s2 -> String.equal s1 s2
+  | (LastLonelyNotation | NotationInScope _), _ -> false
+
+let entry_relative_level_eq t1 t2 = match t1, t2 with
+  | LevelLt n1, LevelLt n2 -> Int.equal n1 n2
+  | LevelLe n1, LevelLe n2 -> Int.equal n1 n2
+  | LevelSome, LevelSome -> true
+  | (LevelLt _ | LevelLe _ | LevelSome), _ -> false
+
+let notation_entry_eq s1 s2 = match (s1,s2) with
+  | InConstrEntry, InConstrEntry -> true
+  | InCustomEntry s1, InCustomEntry s2 -> String.equal s1 s2
+  | (InConstrEntry | InCustomEntry _), _ -> false
+
+let notation_entry_level_eq
+    { notation_entry = e1; notation_level = n1 }
+    { notation_entry = e2; notation_level = n2 } =
+  notation_entry_eq e1 e2 && Int.equal n1 n2
+
+let notation_entry_relative_level_eq
+    { notation_subentry = e1; notation_relative_level = n1; notation_position = s1 }
+    { notation_subentry = e2; notation_relative_level = n2; notation_position = s2 } =
+  notation_entry_eq e1 e2 && entry_relative_level_eq n1 n2 && s1 = s2
+
+let notation_eq (from1,ntn1) (from2,ntn2) =
+  notation_entry_eq from1 from2 && String.equal ntn1 ntn2
 
 let pair_eq f g (x1, y1) (x2, y2) = f x1 x2 && g y1 y2
 
@@ -48,7 +72,7 @@ let ntpe_eq t1 t2 = match t1, t2 with
 | (NtnTypeConstr | NtnTypeBinder _ | NtnTypeConstrList | NtnTypeBinderList _), _ -> false
 
 let var_attributes_eq (_, ((entry1, sc1), tp1)) (_, ((entry2, sc2), tp2)) =
-  notation_entry_level_eq entry1 entry2 &&
+  notation_entry_relative_level_eq entry1 entry2 &&
   pair_eq (List.equal String.equal) (List.equal String.equal) sc1 sc2 &&
   ntpe_eq tp1 tp2
 
@@ -57,7 +81,12 @@ let interpretation_eq (vars1, t1 as x1) (vars2, t2 as x2) =
   List.equal var_attributes_eq vars1 vars2 &&
   Notation_ops.eq_notation_constr (List.map fst vars1, List.map fst vars2) t1 t2
 
-(* Uninterpretation tables *)
+type level = notation_entry_level * entry_relative_level list
+
+let level_eq ({ notation_entry = s1; notation_level = l1}, t1) ({ notation_entry = s2; notation_level = l2}, t2) =
+  notation_entry_eq s1 s2 && Int.equal l1 l2 && List.equal entry_relative_level_eq t1 t2
+
+(** Uninterpretation tables *)
 
 type 'a interp_rule_gen =
   | NotationRule of Constrexpr.specific_notation
@@ -172,7 +201,7 @@ let declare_uninterpretation ?(also_in_cases_pattern=true) rule (metas,c as pat)
   let (key,n) = notation_constr_key c in
   notations_key_table := keymap_add key (also_in_cases_pattern,(rule,pat,n)) !notations_key_table
 
-let freeze ~marshallable =
+let freeze () =
   !notations_key_table
 
 let unfreeze fkm =
@@ -189,7 +218,7 @@ let () =
       Summary.init_function = init }
 
 let with_notation_uninterpretation_protection f x =
-  let fs = freeze ~marshallable:false in
+  let fs = freeze () in
   try let a = f x in unfreeze fs; a
   with reraise ->
     let reraise = Exninfo.capture reraise in

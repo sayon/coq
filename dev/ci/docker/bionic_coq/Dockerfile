@@ -26,7 +26,7 @@ RUN apt-get update -qq && apt-get install --no-install-recommends -y -qq \
         wdiff
 
 # More dependencies of the sphinx doc, pytest for coqtail
-RUN pip3 install docutils==0.16 sphinx==3.0.2 sphinx_rtd_theme==0.4.3 \
+RUN pip3 install docutils==0.17.1 sphinx==4.5.0 sphinx_rtd_theme==1.0.0 \
         antlr4-python3-runtime==4.7.1 sphinxcontrib-bibtex==0.4.2 \
         pytest==5.4.3
 
@@ -66,7 +66,7 @@ RUN opam switch create "${COMPILER}+32bit" && eval $(opam env) && \
 # EDGE switch
 ENV COMPILER_EDGE="4.14.1" \
     BASE_OPAM_EDGE="dune.3.6.1 dune-build-info.3.6.1 dune-release.1.6.2 ocamlfind.1.9.5 odoc.2.1.1" \
-    CI_OPAM_EDGE="elpi.1.16.5 ppx_import.1.10.0 cmdliner.1.1.1 sexplib.v0.15.1 ppx_sexp_conv.v0.15.1 ppx_hash.v0.15.0 ppx_compare.v0.15.0 ppx_deriving_yojson.3.7.0 yojson.1.7.0 uri.4.2.0" \
+    CI_OPAM_EDGE="elpi.1.16.5 ppx_import.1.10.0 cmdliner.1.1.1 sexplib.v0.15.1 ppx_sexp_conv.v0.15.1 ppx_hash.v0.15.0 ppx_compare.v0.15.0 ppx_deriving_yojson.3.7.0 yojson.1.7.0 uri.4.2.0 ppx_yojson_conv.v0.15.1 ppx_inline_test.v0.15.1 ppx_assert.v0.15.0" \
     COQIDE_OPAM_EDGE="lablgtk3-sourceview3.3.1.3"
 
 # EDGE+flambda switch, we install CI_OPAM as to be able to use

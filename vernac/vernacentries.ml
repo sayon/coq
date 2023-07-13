@@ -60,7 +60,6 @@ module DefAttributes = struct
     canonical_instance : bool;
     typing_flags : Declarations.typing_flags option;
     using : Vernacexpr.section_subset_expr option;
-    nonuniform : bool;
     reversible : bool;
     clearbody: bool option;
   }
@@ -71,23 +70,21 @@ module DefAttributes = struct
   let clearbody = bool_attribute ~name:"clearbody"
 
   let parse ?(coercion=false) ?(discharge=NoDischarge) f =
-    let nonuniform = if coercion then ComCoercion.nonuniform else return None in
     let clearbody = match discharge with DoDischarge -> clearbody | NoDischarge -> return None in
-    let ((((((((locality, deprecated), polymorphic), program),
-         canonical_instance), typing_flags), using), nonuniform),
+    let (((((((locality, deprecated), polymorphic), program),
+         canonical_instance), typing_flags), using),
          reversible), clearbody =
       parse (locality ++ deprecation ++ polymorphic ++ program ++
-             canonical_instance ++ typing_flags ++ using ++ nonuniform ++
+             canonical_instance ++ typing_flags ++ using ++
              reversible ++ clearbody)
         f
     in
     let using = Option.map Proof_using.using_from_string using in
     let reversible = Option.default true reversible in
-    let nonuniform = Option.default false nonuniform in
     let () = if Option.has_some clearbody && not (Lib.sections_are_opened())
       then CErrors.user_err Pp.(str "Cannot use attribute clearbody outside sections.")
     in
-    { polymorphic; program; locality; deprecated; canonical_instance; typing_flags; using; nonuniform; reversible; clearbody }
+    { polymorphic; program; locality; deprecated; canonical_instance; typing_flags; using; reversible; clearbody }
 end
 
 let with_def_attributes ?coercion ?discharge ~atts f =
@@ -646,9 +643,9 @@ let start_lemma_com ~typing_flags ~program_mode ~poly ~scope ?clearbody ~kind ~d
   (* XXX: This should be handled in start_with_initialization, see duplicate using in declare.ml *)
   |> vernac_set_used_variables_opt ?using
 
-let vernac_definition_hook ~canonical_instance ~local ~poly ~nonuniform ~reversible = let open Decls in function
+let vernac_definition_hook ~canonical_instance ~local ~poly ~reversible = let open Decls in function
 | Coercion ->
-  Some (ComCoercion.add_coercion_hook ~poly ~nonuniform ~reversible)
+  Some (ComCoercion.add_coercion_hook ~poly ~reversible)
 | CanonicalStructure ->
   Some (Declare.Hook.(make (fun { S.dref } -> Canonical.declare_canonical_structure ?local dref)))
 | SubClass ->
@@ -680,7 +677,7 @@ let vernac_definition_name lid local =
 let vernac_definition_interactive ~atts (discharge, kind) (lid, pl) bl t =
   let open DefAttributes in
   let local = enforce_locality_exp atts.locality discharge in
-  let hook = vernac_definition_hook ~canonical_instance:atts.canonical_instance ~local:atts.locality ~poly:atts.polymorphic ~nonuniform:atts.nonuniform ~reversible:atts.reversible kind in
+  let hook = vernac_definition_hook ~canonical_instance:atts.canonical_instance ~local:atts.locality ~poly:atts.polymorphic ~reversible:atts.reversible kind in
   let program_mode = atts.program in
   let poly = atts.polymorphic in
   let typing_flags = atts.typing_flags in
@@ -692,7 +689,7 @@ let vernac_definition_interactive ~atts (discharge, kind) (lid, pl) bl t =
 let vernac_definition ~atts ~pm (discharge, kind) (lid, pl) bl red_option c typ_opt =
   let open DefAttributes in
   let scope = enforce_locality_exp atts.locality discharge in
-  let hook = vernac_definition_hook ~canonical_instance:atts.canonical_instance ~local:atts.locality ~poly:atts.polymorphic kind ~nonuniform:atts.nonuniform ~reversible:atts.reversible in
+  let hook = vernac_definition_hook ~canonical_instance:atts.canonical_instance ~local:atts.locality ~poly:atts.polymorphic kind ~reversible:atts.reversible in
   let program_mode = atts.program in
   let typing_flags = atts.typing_flags in
   let name = vernac_definition_name lid scope in
@@ -756,12 +753,11 @@ let vernac_assumption ~atts discharge kind l nl =
     Attributes.unsupported_attributes [CAst.make ("using",VernacFlagEmpty)];
   ComAssumption.do_assumptions ~poly:atts.polymorphic ~program_mode:atts.program ~scope ~kind ?deprecation:atts.deprecated nl l
 
-let is_polymorphic_inductive_cumulativity =
+let { Goptions.get = is_polymorphic_inductive_cumulativity } =
   declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
-    ~value:false
     ~key:["Polymorphic";"Inductive";"Cumulativity"]
+    ~value:false
+    ()
 
 let polymorphic_cumulative ~is_defclass =
   let error_poly_context () =
@@ -799,12 +795,11 @@ let polymorphic_cumulative ~is_defclass =
      else
        return (false, false)
 
-let get_uniform_inductive_parameters =
+let { Goptions.get = get_uniform_inductive_parameters } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Uniform"; "Inductive"; "Parameters"]
     ~value:false
+    ()
 
 let should_treat_as_uniform () =
   if get_uniform_inductive_parameters ()
@@ -856,12 +851,11 @@ let private_ind =
   | None -> return false
 
 (** Flag governing use of primitive projections. Disabled by default. *)
-let primitive_flag =
+let { Goptions.get = primitive_flag } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Primitive";"Projections"]
     ~value:false
+    ()
 
 let primitive_proj =
   let open Attributes in
@@ -935,10 +929,13 @@ let preprocess_inductive_decl ~atts kind indl =
     in
     if fst id = AddCoercion then
       user_err Pp.(str "Definitional classes do not support the \">\" syntax.");
-    let ((rf_coercion, rf_instance), (lid, ce)) = l in
+    let ((attr, rf_coercion, rf_instance), (lid, ce)) = l in
+    let rf_locality = match rf_coercion, rf_instance with
+      | AddCoercion, _ | _, (BackInstance | BackInstanceWarning) -> parse option_locality attr
+      | _ -> let () = unsupported_attributes attr in Goptions.OptDefault in
     let f = AssumExpr ((make ?loc:lid.loc @@ Name lid.v), [], ce),
             { rf_coercion ; rf_reversible = None ; rf_instance ; rf_priority = None ;
-              rf_locality = Goptions.OptDefault ; rf_notation = [] ; rf_canonical = true } in
+              rf_locality ; rf_notation = [] ; rf_canonical = true } in
     let recordl = [id, bl, c, None, [f], None] in
     let kind = Class true in
     let records = vernac_record ~template udecl ~cumulative kind ~poly ?typing_flags ~primitive_proj finite recordl in
@@ -956,13 +953,31 @@ let preprocess_inductive_decl ~atts kind indl =
       user_err (str "\"where\" clause not supported for records.")
     in
     let () = List.iter check_where indl in
+    let parse_record_field_attr (x, f) =
+      let attr =
+        let rev = match f.rfu_coercion with
+          | AddCoercion -> reversible
+          | NoCoercion -> Notations.return None in
+        let loc = match f.rfu_coercion, f.rfu_instance with
+          | AddCoercion, _ | _, (BackInstance | BackInstanceWarning) -> option_locality
+          | _ -> Notations.return Goptions.OptDefault in
+        Notations.(rev ++ loc ++ canonical_field) in
+      let (rf_reversible, rf_locality), rf_canonical = parse attr f.rfu_attrs in
+      x,
+      { rf_coercion = f.rfu_coercion;
+        rf_reversible;
+        rf_instance = f.rfu_instance;
+        rf_priority = f.rfu_priority;
+        rf_locality;
+        rf_notation = f.rfu_notation;
+        rf_canonical } in
     let unpack ((id, bl, c, decl), _) = match decl with
     | RecordDecl (oc, fs, ido) ->
       let bl = match bl with
         | bl, None -> bl
         | _ -> CErrors.user_err Pp.(str "Records do not support the \"|\" syntax.")
       in
-      (id, bl, c, oc, fs, ido)
+      (id, bl, c, oc, List.map parse_record_field_attr fs, ido)
     | Constructors _ -> assert false (* ruled out above *)
     in
     let kind = match kind with Class _ -> Class false | _ -> kind in
@@ -1410,14 +1425,13 @@ let vernac_coercion ~atts ref qidst =
   let ref' = smart_global ref in
   match qidst with
   | Some (qids, qidt) ->
-     let ((local, poly), nonuniform), reversible =
-       Attributes.parse Notations.(locality ++ polymorphic ++ ComCoercion.nonuniform ++ reversible) atts in
+     let (local, poly), reversible =
+       Attributes.parse Notations.(locality ++ polymorphic ++ reversible) atts in
      let local = enforce_locality local in
-     let nonuniform = Option.default false nonuniform in
      let reversible = Option.default false reversible in
      let target = cl_of_qualid qidt in
      let source = cl_of_qualid qids in
-     ComCoercion.try_add_new_coercion_with_target ref' ~local ~poly ~nonuniform ~reversible
+     ComCoercion.try_add_new_coercion_with_target ref' ~local ~poly ~reversible
        ~source ~target;
      Flags.if_verbose Feedback.msg_info (pr_global ref' ++ str " is now a coercion")
   | None ->
@@ -1495,7 +1509,7 @@ let vernac_create_hintdb ~module_local id b =
   Hints.create_hint_db module_local id TransparentState.full b
 
 let warn_implicit_core_hint_db =
-  CWarnings.create ~name:"implicit-core-hint-db" ~category:CWarnings.CoreCategories.deprecated
+  CWarnings.create ~name:"implicit-core-hint-db" ~category:Deprecation.Version.v8_10
          (fun () -> strbrk "Adding and removing hints in the core database implicitly is deprecated. "
              ++ strbrk"Please specify a hint database.")
 
@@ -1549,7 +1563,7 @@ let allow_sprop_opt_name = ["Allow";"StrictProp"]
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = allow_sprop_opt_name;
       optread  = (fun () -> Global.sprop_allowed());
       optwrite = Global.set_allow_sprop }
@@ -1557,7 +1571,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Silent"];
       optread  = (fun () -> !Flags.quiet);
       optwrite = ((:=) Flags.quiet) }
@@ -1565,7 +1579,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Implicit";"Arguments"];
       optread  = Impargs.is_implicit_args;
       optwrite = Impargs.make_implicit_args }
@@ -1573,7 +1587,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Strict";"Implicit"];
       optread  = Impargs.is_strict_implicit_args;
       optwrite = Impargs.make_strict_implicit_args }
@@ -1581,7 +1595,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Strongly";"Strict";"Implicit"];
       optread  = Impargs.is_strongly_strict_implicit_args;
       optwrite = Impargs.make_strongly_strict_implicit_args }
@@ -1589,7 +1603,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Contextual";"Implicit"];
       optread  = Impargs.is_contextual_implicit_args;
       optwrite = Impargs.make_contextual_implicit_args }
@@ -1597,7 +1611,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Reversible";"Pattern";"Implicit"];
       optread  = Impargs.is_reversible_pattern_implicit_args;
       optwrite = Impargs.make_reversible_pattern_implicit_args }
@@ -1605,7 +1619,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Maximal";"Implicit";"Insertion"];
       optread  = Impargs.is_maximal_implicit_args;
       optwrite = Impargs.make_maximal_implicit_args }
@@ -1613,7 +1627,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Coercions"];
       optread  = (fun () -> !Constrextern.print_coercions);
       optwrite = (fun b ->  Constrextern.print_coercions := b) }
@@ -1621,7 +1635,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Parentheses"];
       optread  = (fun () -> !Constrextern.print_parentheses);
       optwrite = (fun b ->  Constrextern.print_parentheses := b) }
@@ -1629,7 +1643,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Implicit"];
       optread  = (fun () -> !Constrextern.print_implicits);
       optwrite = (fun b ->  Constrextern.print_implicits := b) }
@@ -1637,7 +1651,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Implicit";"Defensive"];
       optread  = (fun () -> !Constrextern.print_implicits_defensive);
       optwrite = (fun b ->  Constrextern.print_implicits_defensive := b) }
@@ -1645,7 +1659,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Projections"];
       optread  = (fun () -> !Constrextern.print_projections);
       optwrite = (fun b ->  Constrextern.print_projections := b) }
@@ -1653,7 +1667,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Notations"];
       optread  = (fun () -> not !Constrextern.print_no_symbol);
       optwrite = (fun b ->  Constrextern.print_no_symbol := not b) }
@@ -1661,7 +1675,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Raw";"Literals"];
       optread  = (fun () -> !Constrextern.print_raw_literal);
       optwrite = (fun b ->  Constrextern.print_raw_literal := b) }
@@ -1669,7 +1683,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"All"];
       optread  = (fun () -> !Flags.raw_print);
       optwrite = (fun b -> Flags.raw_print := b) }
@@ -1677,7 +1691,7 @@ let () =
 let () =
   declare_int_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Inline";"Level"];
       optread  = (fun () -> Some (Flags.get_inline_level ()));
       optwrite = (fun o ->
@@ -1687,7 +1701,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Kernel"; "Term"; "Sharing"];
       optread  = (fun () -> (Global.typing_flags ()).Declarations.share_reduction);
       optwrite = Global.set_share_reduction }
@@ -1695,7 +1709,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Compact";"Contexts"];
       optread  = (fun () -> Printer.get_compact_context());
       optwrite = (fun b -> Printer.set_compact_context b) }
@@ -1703,7 +1717,7 @@ let () =
 let () =
   declare_int_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Depth"];
       optread  = Topfmt.get_depth_boxes;
       optwrite = Topfmt.set_depth_boxes }
@@ -1711,7 +1725,7 @@ let () =
 let () =
   declare_int_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Width"];
       optread  = Topfmt.get_margin;
       optwrite = Topfmt.set_margin }
@@ -1719,7 +1733,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Printing";"Universes"];
       optread  = (fun () -> !Constrextern.print_universes);
       optwrite = (fun b -> Constrextern.print_universes:=b) }
@@ -1727,7 +1741,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Dump";"Bytecode"];
       optread  = (fun () -> !Vmbytegen.dump_bytecode);
       optwrite = (:=) Vmbytegen.dump_bytecode }
@@ -1735,7 +1749,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Dump";"Lambda"];
       optread  = (fun () -> !Vmlambda.dump_lambda);
       optwrite = (:=) Vmlambda.dump_lambda }
@@ -1743,15 +1757,19 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Parsing";"Explicit"];
       optread  = (fun () -> !Constrintern.parsing_explicit);
       optwrite = (fun b ->  Constrintern.parsing_explicit := b) }
 
 let () =
-  declare_string_option ~preprocess:CWarnings.normalize_flags_string
+  let preprocess flags =
+    CWarnings.check_unknown_warnings flags;
+    CWarnings.normalize_flags_string flags
+  in
+  declare_string_option ~preprocess
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Warnings"];
       optread  = CWarnings.get_flags;
       optwrite = CWarnings.set_flags }
@@ -1759,7 +1777,7 @@ let () =
 let () =
   declare_string_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Debug"];
       optread  = CDebug.get_flags;
       optwrite = CDebug.set_flags }
@@ -1767,7 +1785,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Guard"; "Checking"];
       optread  = (fun () -> (Global.typing_flags ()).Declarations.check_guarded);
       optwrite = (fun b -> Global.set_check_guarded b) }
@@ -1775,7 +1793,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Positivity"; "Checking"];
       optread  = (fun () -> (Global.typing_flags ()).Declarations.check_positive);
       optwrite = (fun b -> Global.set_check_positive b) }
@@ -1783,7 +1801,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Universe"; "Checking"];
       optread  = (fun () -> (Global.typing_flags ()).Declarations.check_universes);
       optwrite = (fun b -> Global.set_check_universes b) }
@@ -1791,7 +1809,7 @@ let () =
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Definitional"; "UIP"];
       optread  = (fun () -> (Global.typing_flags ()).Declarations.allow_uip);
       optwrite = (fun b -> Global.set_typing_flags
@@ -1901,11 +1919,6 @@ let vernac_global_check c =
   pr_universe_ctx_set sigma uctx
 
 
-let get_nth_goal ~pstate n =
-  let pf = Declare.Proof.get pstate in
-  let Proof.{goals;sigma} = Proof.data pf in
-  (sigma, List.nth goals (n - 1))
-
 (* Printing "About" information of a hypothesis of the current goal.
    We only print the type and a small statement to this comes from the
    goal. Precondition: there must be at least one current goal. *)
@@ -1920,16 +1933,20 @@ let print_about_hyp_globs ~pstate ?loc ref_or_by_not udecl glopt =
     in
     (* FIXME error on non None udecl if we find the hyp. *)
     let glnumopt = query_command_selector ?loc glopt in
-    let (sigma, ev), id =
+    let pf = Declare.Proof.get pstate in
+    let Proof.{goals; sigma} = Proof.data pf in
+    let ev, id =
       let open Constrexpr in
       match glnumopt, ref_or_by_not.v with
       | None,AN qid when qualid_is_ident qid -> (* goal number not given, catch any failure *)
-         (try get_nth_goal ~pstate 1, qualid_basename qid with _ -> raise NoHyp)
+        (match List.nth_opt goals 0 with
+         | None -> raise NoHyp
+         | Some goal -> goal), qualid_basename qid
       | Some n,AN qid when qualid_is_ident qid ->  (* goal number given, catch if wong *)
-         (try get_nth_goal ~pstate n, qualid_basename qid
-          with
-            Failure _ -> user_err ?loc
-                          (str "No such goal: " ++ int n ++ str "."))
+        (match List.nth_opt goals (n - 1) with
+         | None  -> user_err ?loc
+                      (str "No such goal: " ++ int n ++ str ".")
+         | Some goal -> goal), qualid_basename qid
       | _ , _ -> raise NoHyp in
     let hyps = Evd.evar_filtered_context (Evd.find_undefined sigma ev) in
     let decl = Context.Named.lookup id hyps in
@@ -2151,16 +2168,50 @@ let vernac_show ~pstate =
 let vernac_check_guard ~pstate =
   let pts = Declare.Proof.get pstate in
   let pfterm = List.hd (Proof.partial_proof pts) in
-  let message =
-    try
-      let { Proof.entry; Proof.sigma } = Proof.data pts in
-      let hyps, _, _ = List.hd (Proofview.initial_goals entry) in
-      let env = Environ.reset_with_named_context hyps (Global.env ()) in
-      Inductiveops.control_only_guard env sigma pfterm;
-      (str "The condition holds up to here")
-    with UserError s ->
-      (str ("Condition violated: ") ++ s ++ str ".")
-  in message
+  let { Proof.entry; Proof.sigma } = Proof.data pts in
+  let hyps, _, _ = List.hd (Proofview.initial_goals entry) in
+  let env = Environ.reset_with_named_context hyps (Global.env ()) in
+  Inductiveops.control_only_guard env sigma pfterm;
+  str "The condition holds up to here."
+
+let vernac_validate_proof ~pstate =
+  let pts = Declare.Proof.get pstate in
+  let { Proof.entry; Proof.sigma } = Proof.data pts in
+  let hyps, pfterm, pftyp = List.hd (Proofview.initial_goals entry) in
+  (* XXX can the initial hyps contain something broken? For now assume they're correct.
+     NB: in the "Lemma foo args : bla." case the args are part of the
+     term and intro'd after the proof is opened. Only the section
+     variables are in the hyps. *)
+  let env = Environ.reset_with_named_context hyps (Global.env ()) in
+  let sigma = Evarconv.solve_unif_constraints_with_heuristics env sigma in
+  let sigma' = Typing.check env sigma pfterm pftyp in
+  let evar_issues =
+    (* Use Evar.Map.merge as a kind of for_all2 *)
+    Evar.Map.merge (fun e orig now -> match orig, now with
+        | None, None -> assert false
+        | Some _, Some _ -> None (* assume same *)
+        | Some evi, None ->
+          let EvarInfo evi' = Evd.find sigma' e in
+          let body = match Evd.evar_body evi' with
+            | Evar_empty -> assert false
+            | Evar_defined body -> body
+          in
+          Some
+            Pp.(str "Evar " ++ Printer.pr_evar sigma (e, evi)
+                ++ spc() ++ str "was inferred by unification to be" ++ spc()
+                ++ pr_econstr_env (Evd.evar_env env evi') sigma' body)
+        | None, Some _ -> (* ignore new evar *)
+          assert (not (Evd.is_defined sigma e));
+          None
+      )
+      (Evd.undefined_map sigma)
+      (Evd.undefined_map sigma')
+  in
+  (* TODO check ustate *)
+
+  if Evar.Map.is_empty evar_issues then
+    str "No issues found."
+  else prlist_with_sep fnl snd (Evar.Map.bindings evar_issues)
 
 let translate_vernac_synterp ?loc ~atts v = let open Vernacextend in match v with
   | EVernacNotation { local; decl } ->
@@ -2482,6 +2533,10 @@ let translate_pure_vernac ?loc ~atts v = let open Vernacextend in match v with
     vtreadproof(fun ~pstate ->
         unsupported_attributes atts;
         Feedback.msg_notice @@ vernac_check_guard ~pstate)
+  | VernacValidateProof ->
+    vtreadproof(fun ~pstate ->
+        unsupported_attributes atts;
+        Feedback.msg_notice @@ vernac_validate_proof ~pstate)
   | VernacProof (tac, using) ->
     vtmodifyproof(fun ~pstate ->
     unsupported_attributes atts;

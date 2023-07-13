@@ -1297,12 +1297,11 @@ Managing the local context
    to the goal, if this respects dependencies. This is
    the inverse of :tacn:`intro`.
 
-   .. exn:: @ident__1 is used in the hypothesis @ident__2.
-      :undocumented:
-
    .. tacn:: revert dependent @ident
 
-      Moves the named hypothesis and all the hypotheses that depend on it to the goal.
+      .. deprecated:: 8.18
+
+      An alias for :tacn:`generalize dependent`.
 
 .. tacn:: move @ident__from @where
 
@@ -1375,9 +1374,6 @@ Managing the local context
    Renaming is done simultaneously, which permits swapping the names of 2 hypotheses.
    (Note that the renaming is applied in the context and the existential
    variables, but the proof term doesn't change.)
-
-   .. exn:: @ident is already used.
-      :undocumented:
 
 .. tacn:: set @alias_definition {? @occurrences }
           set @one_term {? @as_name } {? @occurrences }

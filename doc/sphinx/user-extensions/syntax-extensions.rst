@@ -640,11 +640,6 @@ Displaying information about notations
    .. exn:: @string cannot be interpreted as a known notation in @ident entry. Make sure that symbols are surrounded by spaces and that holes are explicitly denoted by "_".
       :undocumented:
 
-   .. exn:: Unknown custom entry: @ident.
-
-      Occurs when :cmd:`Print Notation` can't find the custom entry given by the
-      user.
-
 .. seealso::
 
     :cmd:`Locate` for information on the definitions and scopes associated with
@@ -1427,7 +1422,7 @@ Note that `_` by itself is a valid :n:`@name` but is not a valid :n:`@ident`.
 
 .. exn:: Unknown custom entry: @ident.
 
-   Occurs when :cmd:`Notation` can't find the custom entry given by the user.
+   Occurs when :cmd:`Notation` or :cmd:`Print Notation` can't find the custom entry given by the user.
 
 .. _Scopes:
 
@@ -1569,9 +1564,7 @@ Binding types or coercion classes to notation scopes
    :attr:`add_top` and :attr:`add_bottom` attributes.
 
    .. attr:: add_top
-      :undocumented:
-
-   .. attr:: add_bottom
+             add_bottom
 
       These :ref:`attributes <attribute>` allow adding additional
       bindings at the top or bottom of the stack of already declared

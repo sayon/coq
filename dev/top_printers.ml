@@ -383,7 +383,7 @@ let constr_display csr =
     | Prop -> "Prop"
     | Type u -> univ_display u;
         "Type("^(string_of_int !cnt)^")"
-    | QSort (q, u) -> univ_display u; Printf.sprintf "QSort(%i, %i)" (Sorts.QVar.repr q) !cnt
+    | QSort (q, u) -> univ_display u; Printf.sprintf "QSort(%s, %i)" (Sorts.QVar.to_string q) !cnt
 
   and universes_display l =
     Array.fold_right (fun x i -> level_display x; (string_of_int !cnt)^(if not(i="")
@@ -535,7 +535,7 @@ let print_pure_constr csr =
     | Type u -> open_hbox();
         print_string "Type("; pp (Universe.raw_pr u); print_string ")"; close_box()
     | QSort (q, u) -> open_hbox();
-        print_string "QSort("; pp (int @@ QVar.repr q); print_string ", "; pp (Universe.raw_pr u); print_string ")"; close_box()
+        print_string "QSort("; pp (QVar.pr q); print_string ", "; pp (Universe.raw_pr u); print_string ")"; close_box()
 
   and name_display x = match x.binder_name with
     | Name id -> print_string (Id.to_string id)
@@ -619,7 +619,7 @@ let () =
   let cmd_fn c ?loc:_ ~atts () = vtdefault (fun () -> in_current_context econstr_display c) in
   let cmd_class _ = VtQuery in
   let cmd : ty_ml = TyML (false, cmd_sig, cmd_fn, Some cmd_class) in
-  vernac_extend ~command:"PrintConstr" [cmd]
+  static_vernac_extend ~plugin:None ~command:"PrintConstr" [cmd]
 
 let () =
   let open Vernacextend in
@@ -628,7 +628,7 @@ let () =
   let cmd_fn c ?loc:_ ~atts () = vtdefault (fun () -> in_current_context print_pure_econstr c) in
   let cmd_class _ = VtQuery in
   let cmd : ty_ml = TyML (false, cmd_sig, cmd_fn, Some cmd_class) in
-  vernac_extend ~command:"PrintPureConstr" [cmd]
+  static_vernac_extend ~plugin:None ~command:"PrintPureConstr" [cmd]
 
 (* Setting printer of unbound global reference *)
 open Names

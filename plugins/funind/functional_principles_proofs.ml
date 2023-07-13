@@ -20,6 +20,7 @@ open Namegen
 open Names
 open Pp
 open Tactics
+open Induction
 open Indfun_common
 open Libnames
 open Context.Rel.Declaration
@@ -616,7 +617,7 @@ let build_proof (interactive_proof : bool) (fnames : Constant.t list) ptes_infos
                       make_refl_eq (Lazy.force refl_equal) type_of_term t
                     in
                     tclTHENLIST
-                      [ generalize (term_eq :: List.map mkVar dyn_infos.rec_hyps)
+                      [ Generalize.generalize (term_eq :: List.map mkVar dyn_infos.rec_hyps)
                       ; thin dyn_infos.rec_hyps
                       ; pattern_option [(Locus.AllOccurrencesBut [1], t)] None
                       ; observe_tac "toto"
@@ -807,14 +808,14 @@ let generalize_non_dep hyp =
       (*   observe (str "to_revert := " ++ prlist_with_sep spc Ppconstr.pr_id to_revert); *)
       Tacticals.tclTHEN
         ((* observe_tac "h_generalize" *)
-         generalize (List.map mkVar to_revert))
+         Generalize.generalize (List.map mkVar to_revert))
         ((* observe_tac "thin" *) clear to_revert))
 
 let id_of_decl = RelDecl.get_name %> Nameops.Name.get_id
 let var_of_decl = id_of_decl %> mkVar
 
 let revert idl =
-  Tacticals.tclTHEN (generalize (List.map mkVar idl)) (clear idl)
+  Tacticals.tclTHEN (Generalize.generalize (List.map mkVar idl)) (clear idl)
 
 let generate_equation_lemma env evd fnames f fun_num nb_params nb_args rec_args_num
     =
@@ -829,8 +830,10 @@ let generate_equation_lemma env evd fnames f fun_num nb_params nb_args rec_args_
       , Array.init (nb_params + nb_args) (fun i ->
             mkRel (nb_params + nb_args - i)) )
   in
-  let f_body, _, _ =
-    Option.get (Global.body_of_constant_body Library.indirect_accessor f_def)
+  let f_body = match f_def.const_body with
+  | Def d -> d
+  | OpaqueDef _ | Primitive _ | Undef _ ->
+    CErrors.user_err (Pp.str "Definition without a body")
   in
   let f_body = EConstr.of_constr f_body in
   let params, f_body_with_params = decompose_lambda_n evd nb_params f_body in
@@ -991,14 +994,15 @@ let prove_princ_for_struct (evd : Evd.evar_map ref) interactive_proof fun_num
         ; args = List.map fresh_decl princ_info.args }
       in
       let get_body const =
-        match Global.body_of_constant Library.indirect_accessor const with
-        | Some (body, _, _) ->
-          let env = Global.env () in
+        let env = Global.env () in
+        let body = Environ.lookup_constant const env in
+        match body.Declarations.const_body with
+        | Def body ->
           let sigma = Evd.from_env env in
           Tacred.cbv_norm_flags
             (CClosure.RedFlags.mkflags [CClosure.RedFlags.fZETA])
             env sigma (EConstr.of_constr body)
-        | None -> user_err Pp.(str "Cannot define a principle over an axiom ")
+        | Undef _ | Primitive _ | OpaqueDef _ -> user_err Pp.(str "Cannot define a principle over an axiom ")
       in
       let fbody = get_body fnames.(fun_num) in
       let f_ctxt, f_body = decompose_lambda sigma fbody in
@@ -1473,7 +1477,7 @@ let prove_principle_for_gen (f_ref, functional_ref, eq_ref) tcc_lemma_ref is_mes
       in
       let open Tacticals in
       let revert l =
-        tclTHEN (Tactics.generalize (List.map mkVar l)) (clear l)
+        tclTHEN (Generalize.generalize (List.map mkVar l)) (clear l)
       in
       let fix_id = Nameops.Name.get_id (fresh_id (Name hrec_id)) in
       let prove_rec_arg_acc =
@@ -1520,7 +1524,7 @@ let prove_principle_for_gen (f_ref, functional_ref, eq_ref) tcc_lemma_ref is_mes
                 (Id.Set.of_list hyps)
             in
             tclTHENLIST
-              [ generalize [lemma]
+              [ Generalize.generalize [lemma]
               ; Simple.intro hid
               ; Elim.h_decompose_and (mkVar hid)
               ; Proofview.Goal.enter (fun g ->

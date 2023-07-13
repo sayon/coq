@@ -35,7 +35,7 @@ variables:
   # $DATE is so we can tell what's what in the image list
   # The $hash is the first 10 characters of the md5 of the Dockerfile. e.g.
   # echo $(md5sum dev/ci/docker/bionic_coq/Dockerfile | head -c 10)
-  CACHEKEY: "bionic_coq-V2022-02-16-401854eb90"
+  CACHEKEY: "bionic_coq-V2023-06-29-2b9dca3152"
   IMAGE: "$CI_REGISTRY_IMAGE:$CACHEKEY"
 
   # By default, jobs run in the base switch; override to select another switch
@@ -722,6 +722,7 @@ library:ci-geocoq:
   needs:
   - build:edge+flambda
   - library:ci-mathcomp
+  allow_failure: true
 
 library:ci-hott:
   extends: .ci-template
@@ -776,6 +777,12 @@ library:ci-analysis:
 
 library:ci-paco:
   extends: .ci-template
+
+library:ci-itree:
+  extends: .ci-template
+  needs:
+    - build:base
+    - library:ci-paco
 
 library:ci-sf:
   extends: .ci-template
@@ -832,6 +839,9 @@ library:ci-coq_library_undecidability:
 plugin:ci-aac_tactics:
   extends: .ci-template-flambda
 
+plugin:ci-atbr:
+  extends: .ci-template-flambda
+
 plugin:ci-itauto:
   extends: .ci-template
 
@@ -872,6 +882,9 @@ plugin:ci-fiat_parsers:
   extends: .ci-template
 
 plugin:ci-lean_importer:
+  extends: .ci-template
+
+plugin:ci-ltac2_compiler:
   extends: .ci-template
 
 plugin:ci-metacoq:
@@ -931,6 +944,9 @@ plugin:ci-coq_lsp:
   needs:
   - build:edge+flambda
   - plugin:ci-serapi
+
+plugin:ci-vscoq:
+  extends: .ci-template-flambda
 
 plugin:ci-smtcoq:
   extends: .ci-template

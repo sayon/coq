@@ -10,6 +10,7 @@
 
 open Util
 open Pp
+open Notationextern
 open Notation
 open Constrexpr
 
@@ -38,9 +39,9 @@ let ppcmd_of_cut = function
 type pattern_quote_style = QuotedPattern | NotQuotedPattern
 
 type unparsing =
-  | UnpMetaVar of entry_relative_level * Extend.side option
+  | UnpMetaVar of entry_relative_level * side option
   | UnpBinderMetaVar of entry_relative_level * pattern_quote_style
-  | UnpListMetaVar of entry_relative_level * unparsing list * Extend.side option
+  | UnpListMetaVar of entry_relative_level * unparsing list * side option
   | UnpBinderListMetaVar of
       bool (* true if open binder *) *
       bool (* true if printed with a quote *) *
@@ -75,7 +76,7 @@ type generic_notation_printing_rules = {
 }
 
 let generic_notation_printing_rules =
-  Summary.ref ~name:"generic-notation-printing-rules" (NotationMap.empty : generic_notation_printing_rules NotationMap.t)
+  Summary.ref ~stage:Synterp ~name:"generic-notation-printing-rules" (NotationMap.empty : generic_notation_printing_rules NotationMap.t)
 
 let specific_notation_printing_rules =
   Summary.ref ~name:"specific-notation-printing-rules" (SpecificNotationMap.empty : notation_printing_rules SpecificNotationMap.t)

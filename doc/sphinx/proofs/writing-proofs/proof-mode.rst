@@ -246,9 +246,6 @@ When the proof is completed, you can exit proof mode with commands such as
    :n:`All`
      Aborts all current proofs.
 
-   .. exn:: No focused proof (No proof-editing in progress).
-      :undocumented:
-
 .. cmd:: Proof @term
    :name: Proof `term`
 
@@ -1022,6 +1019,13 @@ Requesting information
    The command :cmd:`Guarded` allows checking if the guard condition for
    fixpoint and cofixpoint is violated at some time of the construction
    of the proof without having to wait the completion of the proof.
+
+.. cmd:: Validate Proof
+
+   Checks that the current partial proof is well-typed.
+   It is useful for finding tactic bugs since without it, such errors will only be detected at :cmd:`Qed` time.
+
+   It does not check the guard condition.  Use :cmd:`Guarded` for that.
 
 .. _showing_diffs:
 

@@ -251,6 +251,10 @@ let ml_load p =
   | WithoutTop ->
     PluginSpec.load p
 
+let load_module x = match !load with
+  | WithTop t -> t.load_module x
+  | WithoutTop -> ()
+
 (* Adds a path to the ML paths *)
 let add_ml_dir s =
   match !load with
@@ -395,7 +399,7 @@ let unfreeze_ml_modules x =
 let () =
   Summary.declare_ml_modules_summary
     { stage = Summary.Stage.Synterp
-    ; Summary.freeze_function = (fun ~marshallable ->
+    ; Summary.freeze_function = (fun () ->
           get_loaded_modules () |> List.map PluginSpec.repr)
     ; Summary.unfreeze_function = unfreeze_ml_modules
     ; Summary.init_function = reset_loaded_modules }

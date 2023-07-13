@@ -198,8 +198,8 @@ let build_functional_principle env (sigma : Evd.evar_map) old_princ_type sorts f
     _i proof_tac hook =
   (* First we get the type of the old graph principle *)
   let mutr_nparams =
-    (Tactics.compute_elim_sig sigma (EConstr.of_constr old_princ_type))
-      .Tactics.nparams
+    (Induction.compute_elim_sig sigma (EConstr.of_constr old_princ_type))
+      .Induction.nparams
   in
   let new_principle_type =
     Functional_principles_types.compute_new_princ_type_from_rel (Global.env ())
@@ -225,7 +225,7 @@ let change_property_sort evd toSort princ princName =
   let open Context.Rel.Declaration in
   let toSort = EConstr.ESorts.kind evd toSort in
   let princ = EConstr.of_constr princ in
-  let princ_info = Tactics.compute_elim_sig evd princ in
+  let princ_info = Induction.compute_elim_sig evd princ in
   let change_sort_in_predicate decl =
     LocalAssum
       ( get_annot decl
@@ -244,7 +244,7 @@ let change_property_sort evd toSort princ princName =
   in
   let init =
     let nargs =
-      princ_info.Tactics.nparams + List.length princ_info.Tactics.predicates
+      princ_info.Induction.nparams + List.length princ_info.Induction.predicates
     in
     Constr.mkApp
       ( EConstr.Unsafe.to_constr princName_as_constr
@@ -253,10 +253,10 @@ let change_property_sort evd toSort princ princName =
   ( evd
   , Term.it_mkLambda_or_LetIn
       (Term.it_mkLambda_or_LetIn init
-         (List.map change_sort_in_predicate princ_info.Tactics.predicates))
+         (List.map change_sort_in_predicate princ_info.Induction.predicates))
       (List.map
          (fun d -> Termops.map_rel_decl EConstr.Unsafe.to_constr d)
-         princ_info.Tactics.params) )
+         princ_info.Induction.params) )
 
 let generate_functional_principle (evd : Evd.evar_map ref) old_princ_type sorts
     new_princ_name funs i proof_tac =
@@ -606,7 +606,7 @@ let prove_fun_correct evd graphs_constr schemes lemmas_types_infos i :
       (* and the principle to use in this lemma in $\zeta$ normal form *)
       let f_principle, princ_type = schemes.(i) in
       let princ_type = Reductionops.nf_zeta (Global.env ()) evd princ_type in
-      let princ_infos = Tactics.compute_elim_sig evd princ_type in
+      let princ_infos = Induction.compute_elim_sig evd princ_type in
       (* The number of args of the function is then easily computable *)
       let nb_fun_args =
         Termops.nb_prod (Proofview.Goal.sigma g) (Proofview.Goal.concl g) - 2
@@ -623,7 +623,7 @@ let prove_fun_correct evd graphs_constr schemes lemmas_types_infos i :
       in
       let ids = principle_id :: ids in
       (* We get the branches of the principle *)
-      let branches = List.rev princ_infos.Tactics.branches in
+      let branches = List.rev princ_infos.Induction.branches in
       (* and built the intro pattern for each of them *)
       let intro_pats =
         List.map
@@ -689,7 +689,7 @@ let prove_fun_correct evd graphs_constr schemes lemmas_types_infos i :
         (* in fact we must also add the parameters to the constructor args *)
         let constructor_args g =
           let params_id =
-            fst (List.chop princ_infos.Tactics.nparams args_names)
+            fst (List.chop princ_infos.Induction.nparams args_names)
           in
           List.map mkVar params_id @ constructor_args g
         in
@@ -877,7 +877,7 @@ let generalize_dependent_of x hyp =
             when (not (Id.equal id hyp))
                  && Termops.occur_var (Proofview.Goal.env g)
                       (Proofview.Goal.sigma g) x t ->
-            tclTHEN (Tactics.generalize [EConstr.mkVar id]) (thin [id])
+            tclTHEN (Generalize.generalize [EConstr.mkVar id]) (thin [id])
           | _ -> Proofview.tclUNIT ())
         (Proofview.Goal.hyps g))
 
@@ -1076,7 +1076,7 @@ let prove_fun_complete funcs graphs schemes lemmas_types_infos i :
           (EConstr.of_constr schemes.(i))
       in
       tclTYPEOFTHEN graph_principle (fun sigma princ_type ->
-          let princ_infos = Tactics.compute_elim_sig sigma princ_type in
+          let princ_infos = Induction.compute_elim_sig sigma princ_type in
           (* Then we get the number of argument of the function
              and compute a fresh name for each of them
           *)
@@ -1140,7 +1140,7 @@ let prove_fun_complete funcs graphs schemes lemmas_types_infos i :
                     (Genredexpr.Cbv
                        {Redops.all_flags with Genredexpr.rDelta = false})
                     Locusops.onConcl
-                ; generalize (List.map mkVar ids)
+                ; Generalize.generalize (List.map mkVar ids)
                 ; thin ids ]
             else
               unfold_in_concl
@@ -1181,7 +1181,7 @@ let prove_fun_complete funcs graphs schemes lemmas_types_infos i :
           tclTHENLIST
             [ tclMAP Simple.intro (args_names @ [res; hres])
             ; observe_tac "h_generalize"
-                (generalize
+                (Generalize.generalize
                    [ mkApp
                        ( applist (graph_principle, params)
                        , Array.map (fun c -> applist (c, params)) lemmas ) ])
@@ -1218,18 +1218,20 @@ let get_funs_constant mp =
   function
   | const ->
     let find_constant_body const =
-      match Global.body_of_constant Library.indirect_accessor const with
-      | Some (body, _, _) ->
+      let env = Global.env () in
+      let body = Environ.lookup_constant const env in
+      match body.Declarations.const_body with
+      | Def body ->
         let body =
           Tacred.cbv_norm_flags
             (CClosure.RedFlags.mkflags [CClosure.RedFlags.fZETA])
-            (Global.env ())
-            (Evd.from_env (Global.env ()))
+            env
+            (Evd.from_env env)
             (EConstr.of_constr body)
         in
         let body = EConstr.Unsafe.to_constr body in
         body
-      | None ->
+      | Undef _ | OpaqueDef _ | Primitive _ ->
         CErrors.user_err Pp.(str "Cannot define a principle over an axiom ")
     in
     let f = find_constant_body const in
@@ -2057,9 +2059,9 @@ let make_graph (f_ref : GlobRef.t) =
             ++ Termops.pr_global_env env (ConstRef c))
     | _ -> CErrors.user_err Pp.(str "Not a function reference")
   in
-  match Global.body_of_constant_body Library.indirect_accessor c_body with
-  | None -> CErrors.user_err (Pp.str "Cannot build a graph over an axiom!")
-  | Some (body, _, _) ->
+  match c_body.Declarations.const_body with
+  | Undef _ | Primitive _ | OpaqueDef _ -> CErrors.user_err (Pp.str "Cannot build a graph over an axiom!")
+  | Def body ->
     let env = Global.env () in
     let extern_body, extern_type =
       with_full_print

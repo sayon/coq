@@ -209,21 +209,18 @@ Moves current tip to `${stateId}`, such that commands may be added to the new st
 ```html
 <call val="Init"><option val="none"/></call>
 ```
-* With options. Looking at
-  [ide_slave.ml](https://github.com/coq/coq/blob/c5d0aa889fa80404f6c291000938e443d6200e5b/ide/ide_slave.ml#L355),
-  it seems that `options` is just the name of a script file, whose path
-  is added via `Add LoadPath` to the initial state.
+* With options:
 ```html
 <call val="Init">
   <option val="some">
-    <string>${options}</string>
+    <string>${v_file}.v</string>
   </option>
 </call>
 ```
-Providing the script file enables Coq to use .aux files created during
-compilation. Those file contain timing information that allow Coq to
-choose smartly between asynchronous and synchronous processing of
-proofs.
+Providing the script file `$v_file.v` enables Coq to use the `.$v_file.aux`
+file created during compilation. Those file contain timing information
+that allow Coq to choose smartly between asynchronous and synchronous
+processing of proofs.
 
 #### *Returns*
 * The initial stateId (not associated with a sentence)
@@ -926,13 +923,19 @@ Ex: `status = "Idle"` or `status = "proof: myLemmaName"` or `status = "Dead"`
   </feedback_content>
 </feedback>
 ```
+* <a name="location">Location</a>, a Coq location:
+```xml
+   <loc start="${start_offset}" stop="${stop_offset}
+        line_nb="${start_line}" bol_pos="${begin_of_start_line_offset}"
+        line_nb_last="${end_line}" bol_pos_last="${begin_of_end_line_offset}"
+```
 
-* <a name="feedback-custom">Custom</a>. A feedback message that Coq plugins can use to return structured results, including results from Ltac profiling. Optionally, `startPos` and `stopPos` define a range of offsets in the document that the message refers to; otherwise, they will be 0. `customTag` is intended as a unique string that identifies what kind of payload is contained in `customXML`.
+* <a name="feedback-custom">Custom</a>. A feedback message that Coq plugins can use to return structured results, including results from Ltac profiling. `customTag` is intended as a unique string that identifies what kind of payload is contained in `customXML`. An optional location may be attached if present in the message.
 ```xml
 <feedback object="state" route="0">
   <state_id val="${stateId}"/>
   <feedback_content val="custom">
-    <loc start="${startPos}" stop="${stopPos}"/>
+    <option val="none|some">${loc}</option>
     <string>${customTag}</string>
     ${customXML}
   </feedback_content>

@@ -12,6 +12,14 @@ open Names
 open Notation_term
 open Glob_term
 
+(** Constr default entries *)
+
+(* Equivalent to an entry "in constr at level 0"; used for coercion to constr *)
+val constr_lowest_level : Constrexpr.notation_entry_level
+
+(* Equivalent to "x constr" in a subentry, at highest level *)
+val constr_some_level : Constrexpr.notation_entry_relative_level
+
 (** {5 Utilities about [notation_constr]} *)
 
 val eq_notation_constr : Id.t list * Id.t list -> notation_constr -> notation_constr -> bool
@@ -89,6 +97,3 @@ val match_notation_constr_ind_pattern :
   inductive -> 'a cases_pattern_g list -> interpretation ->
   (('a cases_pattern_g * extended_subscopes) list * ('a cases_pattern_g list * extended_subscopes) list) *
     (bool * int * 'a cases_pattern_g list)
-
-(** {5 Matching a notation pattern against a [glob_constr]} *)
-

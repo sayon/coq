@@ -1,3 +1,12 @@
+## Changes between Coq 8.17 and Coq 8.18
+
+### XML protocol
+
+Version 20230413, see xml-protocol.md for details.
+
+- Coq locations are now fully transmitted, including line and column
+  information vs the previous start/end offset.
+
 ## Changes between Coq 8.15 and Coq 8.16
 
 ### Plugin Interface
@@ -143,6 +152,15 @@ deprecation warning tells what to do.
   This position expects the entry to be non-empty and populates the topmost
   defined level with the provided rules. Note that this differs from FIRST,
   which creates a new level and prepends it to the list of levels of the entry.
+
+### Notations:
+
+- The type `notation_entry_level` has been split into two: the name
+  `notation_entry_level` still exists and is used to characterize the
+  level and custom entry name (if any) where a grammar rule lives; the
+  new `notation_subentry_level` is to characterize the level (possibly
+  none) and custom entry name associated to the variables (=
+  non-terminal subentries) of the grammar rule.
 
 ## Changes between Coq 8.12 and Coq 8.13
 

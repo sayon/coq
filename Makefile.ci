@@ -12,6 +12,7 @@ CI_TARGETS= \
     ci-itauto \
     ci-aac_tactics \
     ci-argosy \
+    ci-atbr \
     ci-autosubst \
     ci-bbv \
     ci-bedrock2 \
@@ -50,6 +51,7 @@ CI_TARGETS= \
     ci-iris \
     ci-jasmin \
     ci-lean_importer \
+    ci-ltac2_compiler \
     ci-math_classes \
     ci-mathcomp \
     ci-mathcomp_test \
@@ -81,6 +83,7 @@ CI_TARGETS= \
     ci-unimath \
     ci-unicoq \
     ci-verdi_raft \
+    ci-vscoq \
     ci-vst
 
 .PHONY: ci-all $(CI_TARGETS)
@@ -130,6 +133,7 @@ ci-geocoq: ci-mathcomp
 
 ci-simple_io: ci-ext_lib
 ci-quickchick: ci-ext_lib ci-simple_io ci-mathcomp
+ci-itree: ci-ext_lib ci-paco
 
 ci-equations_test: ci-equations
 

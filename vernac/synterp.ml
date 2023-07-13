@@ -22,17 +22,16 @@ open Attributes
    programs that cannot be statically classified. *)
 let proof_mode_opt_name = ["Default";"Proof";"Mode"]
 
-let get_default_proof_mode =
+let { Goptions.get = get_default_proof_mode } =
   Goptions.declare_interpreted_string_option_and_ref
     ~stage:Summary.Stage.Synterp
-    ~depr:false
     ~key:proof_mode_opt_name
     ~value:(Pvernac.register_proof_mode "Noedit" Pvernac.Vernac_.noedit_mode)
     (fun name -> match Pvernac.lookup_proof_mode name with
     | Some pm -> pm
     | None -> CErrors.user_err Pp.(str (Format.sprintf "No proof mode named \"%s\"." name)))
     Pvernac.proof_mode_to_string
-
+    ()
 
 let module_locality = Attributes.Notations.(locality >>= fun l -> return (make_module_locality l))
 
@@ -45,7 +44,7 @@ let with_module_locality ~atts f =
   f ~module_local
 
 let warn_legacy_export_set =
-  CWarnings.create ~name:"legacy-export-set" ~category:CWarnings.CoreCategories.deprecated
+  CWarnings.create ~name:"legacy-export-set" ~category:Deprecation.Version.v8_18
     Pp.(fun () -> strbrk "Syntax \"Export Set\" is deprecated, use the attribute syntax \"#[export] Set\" instead.")
 
 type module_entry = Modintern.module_struct_expr * Names.ModPath.t * Modintern.module_kind * Entries.inline
@@ -283,25 +282,6 @@ let synterp_require from export qidl =
 let expand filename =
   Envars.expand_path_macros ~warn:(fun x -> Feedback.msg_warning (str x)) filename
 
-let warn_add_loadpath = CWarnings.create ~name:"add-loadpath-deprecated" ~category:CWarnings.CoreCategories.deprecated
-    (fun () -> strbrk "Commands \"Add LoadPath\" and \"Add Rec LoadPath\" are deprecated." ++ spc () ++
-               strbrk "Use command-line \"-Q\" or \"-R\" or put them in your _CoqProject file instead." ++ spc () ++
-               strbrk "If \"Add [Rec] LoadPath\" is an important feature for you, please open an issue at" ++ spc () ++
-               strbrk "https://github.com/coq/coq/issues" ++ spc () ++ strbrk "and explain your workflow.")
-
-let synterp_add_loadpath ~implicit pdir coq_path =
-  let open Loadpath in
-  warn_add_loadpath ();
-  let pdir = expand pdir in
-  add_vo_path { unix_path = pdir; coq_path; has_ml = true; implicit; recursive = true }
-
-let synterp_remove_loadpath path =
-  Loadpath.remove_load_path (expand path)
-  (* Coq syntax for ML or system commands *)
-
-let synterp_add_ml_path path =
-  Mltop.add_ml_dir (expand path)
-
 let synterp_declare_ml_module ~local l =
   let local = Option.default false local in
   let l = List.map expand l in
@@ -336,37 +316,22 @@ let synterp_begin_section ({v=id} as lid) =
 (** A global default timeout, controlled by option "Set Default Timeout n".
     Use "Unset Default Timeout" to deactivate it (or set it to 0). *)
 
-let default_timeout = ref None
-
 let check_timeout n =
   if n <= 0 then CErrors.user_err Pp.(str "Timeout must be > 0.")
 
-let () = let open Goptions in
-  declare_int_option
-    { optstage = Summary.Stage.Synterp;
-      optdepr  = false;
-      optkey   = ["Default";"Timeout"];
-      optread  = (fun () -> !default_timeout);
-      optwrite = (fun n -> Option.iter check_timeout n; default_timeout := n) }
-
 (* Timeout *)
-let with_timeout ?timeout (f : 'a -> 'b) (x : 'a) : 'b =
-  match !default_timeout, timeout with
-  | _, Some n
-  | Some n, None ->
-    check_timeout n;
-    let n = float_of_int n in
-    let start = Unix.gettimeofday () in
-    begin match Control.timeout n f x with
-    | None -> Exninfo.iraise (Exninfo.capture CErrors.Timeout)
-    | Some (ctrl,v) ->
-      let stop = Unix.gettimeofday () in
-      let remaining = n -. (start -. stop) in
-      if remaining <= 0. then Exninfo.iraise (Exninfo.capture CErrors.Timeout)
-      else ControlTimeout { remaining } :: ctrl, v
-    end
-  | None, None ->
-    f x
+let with_timeout ~timeout:n (f : 'a -> 'b) (x : 'a) : 'b =
+  check_timeout n;
+  let n = float_of_int n in
+  let start = Unix.gettimeofday () in
+  begin match Control.timeout n f x with
+  | None -> Exninfo.iraise (Exninfo.capture CErrors.Timeout)
+  | Some (ctrl,v) ->
+    let stop = Unix.gettimeofday () in
+    let remaining = n -. (start -. stop) in
+    if remaining <= 0. then Exninfo.iraise (Exninfo.capture CErrors.Timeout)
+    else ControlTimeout { remaining } :: ctrl, v
+  end
 
 let test_mode = ref false
 
@@ -388,9 +353,9 @@ let real_error_loc ~cmdloc ~eloc =
   else cmdloc
 
 let with_fail ~loc f =
-  let st = Vernacstate.Synterp.freeze ~marshallable:false in
+  let st = Vernacstate.Synterp.freeze () in
   let res = with_fail f in
-  let transient_st = Vernacstate.Synterp.freeze ~marshallable:false in
+  let transient_st = Vernacstate.Synterp.freeze () in
   Vernacstate.Synterp.unfreeze st;
   match res with
   | Error (ctrl, v) ->
@@ -402,9 +367,9 @@ let with_fail ~loc f =
     [], VernacSynterp EVernacNoop
 
 let with_succeed f =
-  let st = Vernacstate.Synterp.freeze ~marshallable:false in
+  let st = Vernacstate.Synterp.freeze () in
   let (ctrl, v) = f () in
-  let transient_st = Vernacstate.Synterp.freeze ~marshallable:false in
+  let transient_st = Vernacstate.Synterp.freeze () in
   Vernacstate.Synterp.unfreeze st;
   ControlSucceed { st = transient_st } :: ctrl, v
 
@@ -470,18 +435,6 @@ let rec synterp ?loc ~atts v =
     | VernacImport (export,qidl) ->
       let export, mpl = synterp_import export qidl in
       EVernacImport (export,mpl)
-    | VernacAddLoadPath { implicit; physical_path; logical_path } ->
-      unsupported_attributes atts;
-      synterp_add_loadpath ~implicit physical_path logical_path;
-      EVernacNoop
-    | VernacRemoveLoadPath s ->
-      unsupported_attributes atts;
-      synterp_remove_loadpath s;
-      EVernacNoop
-    | VernacAddMLPath (s) ->
-      unsupported_attributes atts;
-      synterp_add_ml_path s;
-      EVernacNoop
     | VernacDeclareMLModule l ->
       with_locality ~atts synterp_declare_ml_module l;
       EVernacNoop
@@ -537,7 +490,7 @@ and synterp_load verbosely fname =
     | None -> entries
     | Some cmd ->
       let entry = v_mod synterp_control cmd in
-      let st = Vernacstate.Synterp.freeze ~marshallable:false in
+      let st = Vernacstate.Synterp.freeze () in
       (load_loop [@ocaml.tailcall]) ((entry,st)::entries)
   in
   let entries = List.rev @@ load_loop [] in
@@ -548,8 +501,28 @@ and synterp_control CAst.{ loc; v = cmd } =
   let control, expr = synterp_control_flag ~loc cmd.control fn cmd.expr in
   CAst.make ?loc { expr; control; attrs = cmd.attrs }
 
+let default_timeout = ref None
+
+let () = let open Goptions in
+  declare_int_option
+    { optstage = Summary.Stage.Synterp;
+      optdepr  = None;
+      optkey   = ["Default";"Timeout"];
+      optread  = (fun () -> !default_timeout);
+      optwrite = (fun n -> Option.iter check_timeout n; default_timeout := n) }
+
+let has_timeout ctrl = ctrl |> List.exists (function
+    | Vernacexpr.ControlTimeout _ -> true
+    | _ -> false)
+
 let synterp_control CAst.{ loc; v = cmd } =
-  let control = Option.cata (fun n -> Vernacexpr.ControlTimeout n :: cmd.control) cmd.control !default_timeout in
+  let control = cmd.control in
+  let control = match !default_timeout with
+    | None -> control
+    | Some n ->
+      if has_timeout control then control
+      else Vernacexpr.ControlTimeout n :: control
+  in
   synterp_control @@ CAst.make ?loc { cmd with control }
 
 let synterp_control cmd =

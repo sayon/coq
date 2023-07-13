@@ -145,6 +145,7 @@ let init_load_paths opts =
 
 let init_runtime opts =
   let open Coqargs in
+  Vernacextend.static_linking_done ();
   Lib.init ();
   init_coqlib opts;
   if opts.post.memory_stat then at_exit print_memory_stat;
@@ -181,7 +182,7 @@ let warn_no_native_compiler =
                    strbrk " option ignored.")
 
 let warn_deprecated_native_compiler =
-  CWarnings.create ~name:"deprecated-native-compiler-option" ~category:CWarnings.CoreCategories.deprecated
+  CWarnings.create ~name:"deprecated-native-compiler-option" ~category:Deprecation.Version.v8_14
          (fun () ->
           Pp.strbrk "The native-compiler option is deprecated. To compile native \
           files ahead of time, use the coqnative binary instead.")
@@ -194,4 +195,6 @@ let handle_injection = let open Coqargs in function
 
 let start_library ~top injections =
   Flags.verbosely Declaremods.start_library top;
-  List.iter handle_injection injections
+  CWarnings.override_unknown_warning[@ocaml.warning "-3"] := true;
+  List.iter handle_injection injections;
+  CWarnings.override_unknown_warning[@ocaml.warning "-3"] := false
