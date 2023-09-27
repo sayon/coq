@@ -244,13 +244,6 @@ let quote_notation_token x =
   if (n > 0 && norm) || (n > 2 && x.[0] == '\'') then "'"^x^"'"
   else x
 
-let is_numeral_in_constr entry symbs =
-  match entry, List.filter (function Break _ -> false | _ -> true) symbs with
-  | InConstrEntry, ([Terminal "-"; Terminal x] | [Terminal x]) ->
-      NumTok.Unsigned.parse_string x <> None
-  | _ ->
-      false
-
 let analyze_notation_tokens ~onlyprinting ~infix entry df =
   let df = if infix then quote_notation_token df else df in
   let { recvars; mainvars; symbols } as res = decompose_raw_notation df in
@@ -261,8 +254,8 @@ let analyze_notation_tokens ~onlyprinting ~infix entry df =
         user_err
           (str "Variable " ++ Id.print id ++ str " occurs more than once.")
     | _ -> ());
-  let isnumeral = is_numeral_in_constr entry symbols in
-  res, isnumeral
+  let is_prim_token = is_prim_token_constant_in_constr (entry, symbols) in
+  res, is_prim_token
 
 let adjust_symbols vars notation_symbols =
   let x = Namegen.next_ident_away (Id.of_string "x") vars in
@@ -289,7 +282,7 @@ let adjust_infix_notation df notation_symbols c =
 
 let warn_unexpected_primitive_token_modifier =
   CWarnings.create ~name:"primitive-token-modifier" ~category:CWarnings.CoreCategories.parsing
-         (fun () -> str "Notations for numbers are primitive; skipping this modifier.")
+         (fun () -> str "Notations for numbers or strings are primitive; skipping this modifier.")
 
 let check_no_syntax_modifiers_for_numeral = function
   | [] -> ()
@@ -306,23 +299,29 @@ let pr_notation_entry = function
   | InConstrEntry -> str "constr"
   | InCustomEntry s -> str "custom " ++ str s
 
+let side = function
+  | BorderProd (b,_) -> Some b
+  | _ -> None
+
 let precedence_of_position_and_level from_level = function
   | NumLevel n, BorderProd (b,Some a) ->
-    (let open Gramlib.Gramext in
+    let prec =
+     let open Gramlib.Gramext in
      match a, b with
      | RightA, Left -> LevelLt n
      | RightA, Right -> LevelLe n
      | LeftA, Left -> LevelLe n
      | LeftA, Right -> LevelLt n
-     | NonA, _ -> LevelLt n), Some b
-  | NumLevel n, _ -> LevelLe n, None
-  | NextLevel, _ -> LevelLt from_level, None
-  | DefaultLevel, _ -> LevelSome, None
+     | NonA, _ -> LevelLt n in
+    {notation_subentry = InConstrEntry; notation_relative_level = prec; notation_position = Some b}
+  | NumLevel n, b -> {notation_subentry = InConstrEntry; notation_relative_level = LevelLe n; notation_position = side b}
+  | NextLevel, b -> {notation_subentry = InConstrEntry; notation_relative_level = LevelLt from_level; notation_position = side b}
+  | DefaultLevel, b -> {notation_subentry = InConstrEntry; notation_relative_level = LevelSome; notation_position = side b}
 
 (** Computing precedences of non-terminals for parsing *)
 let precedence_of_entry_type { notation_entry = from_custom; notation_level = from_level } = function
   | ETConstr (custom,_,x) when notation_entry_eq custom from_custom ->
-    fst (precedence_of_position_and_level from_level x)
+    (precedence_of_position_and_level from_level x).notation_relative_level
   | ETConstr (custom,_,(NumLevel n,_)) -> LevelLe n
   | ETConstr (custom,_,(NextLevel,_)) ->
     user_err (strbrk "\"next level\" is only for sub-expressions in the same entry as where the notation is (" ++
@@ -341,13 +340,15 @@ let unparsing_precedence_of_entry_type from_level = function
        with precedence in a constr entry is managed using [prec_less]
        in [ppconstr.ml] *)
     precedence_of_position_and_level from_level x
-  | ETConstr (custom,_,_) ->
+  | ETConstr (custom,_,(_,b)) ->
     (* Precedence of printing for a custom entry is managed using
        explicit insertion of entry coercions at the time of building
        a [constr_expr] *)
-    LevelSome, None
-  | ETPattern (_,n) -> (* in constr *) LevelLe (pattern_entry_level n), None
-  | _ -> LevelSome, None (* should not matter *)
+    {notation_subentry = custom; notation_relative_level = LevelSome; notation_position = side b}
+  | ETPattern (_,n) -> (* in constr *)
+    {notation_subentry = InConstrEntry; notation_relative_level = LevelLe (pattern_entry_level n); notation_position = None}
+  | _ -> (* should not matter *)
+    {notation_subentry = InConstrEntry; notation_relative_level = LevelSome; notation_position = None}
 
 (** Utilities for building default printing rules *)
 
@@ -416,14 +417,14 @@ let check_open_binder isopen sl m =
 
 let unparsing_metavar i from typs =
   let x = List.nth typs (i-1) in
-  let prec,side = unparsing_precedence_of_entry_type from x in
+  let subentry = unparsing_precedence_of_entry_type from x in
   match x with
   | ETConstr _ | ETGlobal | ETBigint ->
-     UnpMetaVar (prec,side)
+     UnpMetaVar subentry
   | ETPattern _ | ETName | ETIdent ->
-     UnpBinderMetaVar (prec,NotQuotedPattern)
+     UnpBinderMetaVar (subentry,NotQuotedPattern)
   | ETBinder isopen ->
-     UnpBinderMetaVar (prec,QuotedPattern)
+     UnpBinderMetaVar (subentry,QuotedPattern)
 
 (** Heuristics for building default printing rules *)
 
@@ -468,14 +469,14 @@ let make_hunks etyps symbols from_level =
     | SProdList (m,sl) :: prods ->
         let i = index_id m vars in
         let typ = List.nth typs (i-1) in
-        let prec,side = unparsing_precedence_of_entry_type from_level typ in
+        let subentry = unparsing_precedence_of_entry_type from_level typ in
         let sl' =
           (* If no separator: add a break *)
           if List.is_empty sl then add_break 1 []
           (* We add NonTerminal for simulation but remove it afterwards *)
           else make true sl in
         let hunk = match typ with
-          | ETConstr _ -> UnpListMetaVar (prec,List.map snd sl',side)
+          | ETConstr _ -> UnpListMetaVar (subentry,List.map snd sl')
           | ETBinder isopen ->
               check_open_binder isopen sl m;
               UnpBinderListMetaVar (isopen,true,List.map snd sl')
@@ -615,13 +616,13 @@ let hunks_of_format (from_level,(vars,typs)) symfmt =
   | SProdList (m,sl) :: symbs, fmt when has_ldots fmt ->
       let i = index_id m vars in
       let typ = List.nth typs (i-1) in
-      let prec,side = unparsing_precedence_of_entry_type from_level typ in
+      let subentry = unparsing_precedence_of_entry_type from_level typ in
       let loc_slfmt,rfmt = read_recursive_format sl fmt in
       let sl, slfmt = aux (sl,loc_slfmt) in
       if not (List.is_empty sl) then error_format ?loc:(find_prod_list_loc loc_slfmt fmt) ();
       let symbs, l = aux (symbs,rfmt) in
       let hunk = match typ with
-        | ETConstr _ -> UnpListMetaVar (prec,slfmt,side)
+        | ETConstr _ -> UnpListMetaVar (subentry,slfmt)
         | ETBinder isopen ->
             check_open_binder isopen sl m;
             UnpBinderListMetaVar (isopen,true,slfmt)
@@ -720,6 +721,12 @@ let keyword_needed need s =
   | Some n ->
     if need then
       Flags.if_verbose Feedback.msg_info (str "Number '" ++ NumTok.Unsigned.print n ++ str "' now a keyword");
+    need
+  | None ->
+  match String.unquote_coq_string s with
+  | Some _ ->
+    if need then
+      Flags.if_verbose Feedback.msg_info (str "String '" ++ str s ++ str "' now a keyword");
     need
   | _ -> true
 
@@ -974,8 +981,8 @@ let check_entry_type = function
   | ETIdent | ETGlobal | ETBigint | ETName | ETBinder _-> ()
 
 let interp_modifiers entry modl = let open NotationMods in
-  let rec interp subtyps acc = function
-  | [] -> subtyps, acc
+  let rec interp acc = function
+  | [] -> acc
   | CAst.{loc;v} :: l -> match v with
     | SetEntryType (s,typ) ->
         let id = Id.of_string s in
@@ -983,15 +990,15 @@ let interp_modifiers entry modl = let open NotationMods in
         if Id.List.mem_assoc id acc.etyps then
           user_err ?loc
             (str s ++ str " is already assigned to an entry or constr level.");
-        interp subtyps { acc with etyps = (id,typ) :: acc.etyps; } l
+        interp { acc with etyps = (id,typ) :: acc.etyps; } l
     | SetItemLevel ([],bko,n) ->
-        interp subtyps acc l
+        interp acc l
     | SetItemLevel (s::idl,bko,n) ->
         let id = Id.of_string s in
         if Id.List.mem_assoc id acc.etyps then
           user_err ?loc
             (str s ++ str " is already assigned to an entry or constr level.");
-        interp ((id,bko,n)::subtyps) acc ((CAst.make ?loc @@ SetItemLevel (idl,bko,n))::l)
+        interp { acc with etyps = (id,ETConstr (entry,bko,n)) :: acc.etyps } ((CAst.make ?loc @@ SetItemLevel (idl,bko,n))::l)
     | SetLevel n ->
         (match entry with
         | InCustomEntry s ->
@@ -1005,24 +1012,20 @@ let interp_modifiers entry modl = let open NotationMods in
         | InConstrEntry ->
           if acc.level <> None then
             user_err ?loc (str "A level is already assigned.");
-          interp subtyps { acc with level = Some n; } l)
+          interp { acc with level = Some n; } l)
     | SetCustomEntry (s,Some n) ->
         (* Note: name of entry already registered in interp_non_syntax_modifiers *)
         if acc.level <> None then
           user_err ?loc (str ("isolated \"at level " ^ string_of_int (Option.get acc.level) ^ "\" unexpected."));
-        interp subtyps { acc with level = Some n } l
+        interp { acc with level = Some n } l
     | SetAssoc a ->
         if not (Option.is_empty acc.assoc) then user_err ?loc Pp.(str "An associativity is given more than once.");
-        interp subtyps { acc with assoc = Some a; } l
+        interp { acc with assoc = Some a; } l
     | SetOnlyParsing | SetOnlyPrinting | SetCustomEntry (_,None) | SetFormat _ | SetItemScope _ ->
         (* interpreted in interp_non_syntax_modifiers *)
         assert false
   in
-  let subtyps, mods = interp [] default modl in
-  (* interpret item levels wrt to main entry *)
-  let extra_etyps = List.map (fun (id,bko,n) -> (id,ETConstr (entry,bko,n))) subtyps in
-  (* Temporary hack: "ETName false" (i.e. "ident" in deprecation phase) means "ETIdent" for custom entries *)
-  { mods with etyps = extra_etyps@mods.etyps }
+  interp default modl
 
 let check_useless_entry_types recvars mainvars etyps =
   let vars = let (l1,l2) = List.split recvars in l1@l2@mainvars in
@@ -1108,14 +1111,8 @@ let interp_non_syntax_modifiers ~reserved ~infix ~abbrev deprecation mods =
       entry = InConstrEntry; format = None; itemscopes = []
     }
   in
-  List.fold_left set (main_data,[]) mods
-
-(* Check if an interpretation can be used for printing a cases printing *)
-let has_no_binders_type =
-  List.for_all (fun (_,(_,typ)) ->
-  match typ with
-  | NtnTypeBinder _ | NtnTypeBinderList _ -> false
-  | NtnTypeConstr | NtnTypeConstrList -> true)
+  let main_data, rest = List.fold_left set (main_data,[]) mods in
+  main_data, List.rev rest
 
 (* Compute precedences from modifiers (or find default ones) *)
 
@@ -1203,17 +1200,21 @@ let make_interpretation_vars
     List.equal String.equal l1 l2
   in
   let check (x, y) =
-    let (_,scope1) = Id.Map.find x allvars in
-    let (_,scope2) = Id.Map.find y allvars in
+    let (_,scope1,_ntn_binding_ids1) = Id.Map.find x allvars in
+    let (_,scope2,_ntn_binding_ids2) = Id.Map.find y allvars in
     if not (eq_subscope scope1 scope2) then error_not_same_scope x y
+    (* Note: binding_ids should currently be the same, and even with
+      eventually more complex notations, such as e.g.
+        Notation "!! x .. y , P .. Q" := (fun x => (P, .. (fun y => (Q, True)) ..)).
+      each occurrence of the recursive notation variables may have its own binders *)
   in
   let () = List.iter check recvars in
   let useless_recvars = List.map snd recvars in
   let mainvars =
     Id.Map.filter (fun x _ -> not (Id.List.mem x useless_recvars)) allvars in
-  Id.Map.mapi (fun x (isonlybinding, sc) ->
+  Id.Map.mapi (fun x (isonlybinding, sc, ntn_binding_ids) ->
     let typ = Id.List.assoc x typs in
-    ((entry_relative_level_of_constr_prod_entry entry typ,sc),
+    ((entry_relative_level_of_constr_prod_entry entry typ, sc), ntn_binding_ids,
      make_interpretation_type (Id.List.mem_assoc x recvars) isonlybinding default_if_binding typ)) mainvars
 
 let check_rule_productivity l =
@@ -1464,7 +1465,6 @@ type notation_obj = {
   notobj_deprecation : Deprecation.t option;
   notobj_notation : notation * notation_location;
   notobj_specific_pp_rules : notation_printing_rules option;
-  notobj_also_in_cases_pattern : bool;
 }
 
 let load_notation_common silently_define_scope_if_undefined _ nobj =
@@ -1487,10 +1487,9 @@ let open_notation i nobj =
     let pat = nobj.notobj_interp in
     let deprecation = nobj.notobj_deprecation in
     let scope = match scope with None -> LastLonelyNotation | Some sc -> NotationInScope sc in
-    let also_in_cases_pattern = nobj.notobj_also_in_cases_pattern in
     (* Declare the notation *)
     (match nobj.notobj_use with
-    | Some use -> Notation.declare_notation (scope,ntn) pat df ~use ~also_in_cases_pattern nobj.notobj_coercion deprecation
+    | Some use -> Notation.declare_notation (scope,ntn) pat df ~use nobj.notobj_coercion deprecation
     | None -> ());
     (* Declare specific format if any *)
     (match nobj.notobj_specific_pp_rules with
@@ -1726,7 +1725,6 @@ let make_notation_interpretation ~local main_data notation_symbols ntn syntax_ru
   let interp = make_interpretation_vars recvars acvars plevel i_typs in
   let map (x, _) = try Some (x, Id.Map.find x interp) with Not_found -> None in
   let vars = List.map_filter map i_vars in (* Order of elements is important here! *)
-  let also_in_cases_pattern = has_no_binders_type vars in
   let onlyparsing,coe = printability level i_typs vars main_data.onlyparsing reversibility ac in
   let main_data = { main_data with onlyparsing } in
   let use = make_use false onlyparsing main_data.onlyprinting in
@@ -1739,7 +1737,6 @@ let make_notation_interpretation ~local main_data notation_symbols ntn syntax_ru
     notobj_deprecation = main_data.deprecation;
     notobj_notation = df';
     notobj_specific_pp_rules = sy_pp_rules;
-    notobj_also_in_cases_pattern = also_in_cases_pattern;
   }
 
 (* Notations without interpretation (Reserved Notation) *)
@@ -1748,10 +1745,10 @@ let add_reserved_notation ~local ~infix ({CAst.loc;v=df},mods) =
   let open SynData in
   let (main_data,mods) = interp_non_syntax_modifiers ~reserved:true ~infix ~abbrev:false None mods in
   let mods = interp_modifiers main_data.entry mods in
-  let notation_symbols, isnumeral = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix main_data.entry df in
+  let notation_symbols, is_prim_token = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix main_data.entry df in
   let notation_symbols = if infix then adjust_reserved_infix_notation notation_symbols else notation_symbols in
   let ntn = make_notation_key main_data.entry notation_symbols.symbols in
-  if isnumeral then user_err ?loc (str "Notations for numbers are primitive and need not be reserved.");
+  if is_prim_token then user_err ?loc (str "Notations for numbers or strings are primitive and need not be reserved.");
   let sd = compute_syntax_data ~local main_data notation_symbols ntn mods in
   let synext = make_syntax_rules true main_data ntn sd in
   List.iter (fun f -> f ()) sd.msgs;
@@ -1773,10 +1770,10 @@ let prepare_where_notation ntn_decl =
   match mods with
   | _::_ -> CErrors.user_err (str"Only modifiers not affecting parsing are supported here.")
   | [] ->
-    let notation_symbols, isnumeral = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix:false main_data.entry df in
+    let notation_symbols, is_prim_token = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix:false main_data.entry df in
     let ntn = make_notation_key main_data.entry notation_symbols.symbols in
     let syntax_rules =
-      if isnumeral then PrimTokenSyntax else
+      if is_prim_token then PrimTokenSyntax else
       try SpecificSyntax (recover_notation_syntax ntn)
       with NoSyntaxRule ->
         user_err Pp.(str "Parsing rule for this notation has to be previously declared.") in
@@ -1800,12 +1797,12 @@ let build_notation_syntax ~local ~infix deprecation ntn_decl =
   (* Extract the modifiers not affecting the parsing rule *)
   let (main_data,syntax_modifiers) = interp_non_syntax_modifiers ~reserved:false ~infix ~abbrev:false deprecation modifiers in
   (* Extract the modifiers not affecting the parsing rule *)
-  let notation_symbols, isnumeral = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix main_data.entry df in
+  let notation_symbols, is_prim_token = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix main_data.entry df in
   (* Add variables on both sides if an infix notation *)
   let df, notation_symbols, c = if infix then adjust_infix_notation df notation_symbols c else df, notation_symbols, c in
   (* Build the canonical identifier of the syntactic part of the notation *)
   let ntn = make_notation_key main_data.entry notation_symbols.symbols in
-  let syntax_rules = if isnumeral then (check_no_syntax_modifiers_for_numeral syntax_modifiers; PrimTokenSyntax) else
+  let syntax_rules = if is_prim_token then (check_no_syntax_modifiers_for_numeral syntax_modifiers; PrimTokenSyntax) else
   match syntax_modifiers with
   | [] ->
     (* No syntax data: try to rely on a previously declared rule *)
@@ -1855,30 +1852,32 @@ let load_scope_command_common silently_define_scope_if_undefined _ (local,scope,
 let load_scope_command =
   load_scope_command_common true
 
-let open_scope_command i (local,scope,o) =
+let open_scope_command i (noexport,scope,o) =
   if Int.equal i 1 then
     match o with
     | ScopeDeclare -> ()
     | ScopeDelimAdd dlm -> Notation.declare_delimiters scope dlm
     | ScopeDelimRemove -> Notation.remove_delimiters scope
-    | ScopeClasses (where, cl) -> List.iter (Notation.declare_scope_class scope ?where) cl
+    | ScopeClasses (where, cl) ->
+      let local = Lib.sections_are_opened () in
+      List.iter (Notation.declare_scope_class local scope ?where) cl
 
 let cache_scope_command o =
   load_scope_command_common false 1 o;
   open_scope_command 1 o
 
-let subst_scope_command (subst,(local,scope,o as x)) = match o with
+let subst_scope_command (subst,(noexport,scope,o as x)) = match o with
   | ScopeClasses (where, cl) ->
       let env = Global.env () in
       let cl' = List.map_filter (subst_scope_class env subst) cl in
       let cl' =
         if List.for_all2eq (==) cl cl' then cl
         else cl' in
-      local, scope, ScopeClasses (where, cl')
+      noexport, scope, ScopeClasses (where, cl')
   | _ -> x
 
-let classify_scope_command (local, _, _) =
-  if local then Dispose else Substitute
+let classify_scope_command (noexport, _, _) =
+  if noexport then Dispose else Substitute
 
 let inScopeCommand : locality_flag * scope_name * scope_command -> obj =
   declare_object {(default_object "DELIMITERS") with
@@ -1930,9 +1929,8 @@ let add_abbreviation ~local deprecation env ident (vars,c) modl =
   let level = (* not relevant *) (constr_lowest_level,[]) in
   let interp = make_interpretation_vars ~default_if_binding:AsAnyPattern [] acvars level (List.map in_pat vars) in
   let vars = List.map (fun (x,_) -> (x, Id.Map.find x interp)) vars in
-  let also_in_cases_pattern = has_no_binders_type vars in
   let onlyparsing = only_parsing || fst (printability None [] vars false reversibility pat) in
-  Abbreviation.declare_abbreviation ~local ~also_in_cases_pattern deprecation ident ~onlyparsing (vars,pat)
+  Abbreviation.declare_abbreviation ~local deprecation ident ~onlyparsing (vars,pat)
 
 (**********************************************************************)
 (* Activating/deactivating notations                                  *)

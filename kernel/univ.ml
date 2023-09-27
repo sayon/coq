@@ -213,13 +213,6 @@ module Level = struct
     let lunion l r =
       union (fun _k l _r -> Some l) l r
 
-    let subst_union l r =
-      union (fun _k l r ->
-        match l, r with
-        | Some _, _ -> Some l
-        | None, None -> Some l
-        | _, _ -> Some r) l r
-
     let diff ext orig =
       fold (fun u v acc ->
         if mem u orig then acc
@@ -992,20 +985,6 @@ let abstract_universes uctx =
   in
   let ctx = (nas, cstrs) in
   instance, ctx
-
-let rec compact_univ s vars i u =
-  match u with
-  | [] -> (s, List.rev vars)
-  | (lvl, _) :: u ->
-    match Level.var_index lvl with
-    | Some k when not (Level.Map.mem lvl s) ->
-      let lvl' = Level.var i in
-      compact_univ (Level.Map.add lvl lvl' s) (k :: vars) (i+1) u
-    | _ -> compact_univ s vars i u
-
-let compact_univ u =
-  let (s, s') = compact_univ Level.Map.empty [] 0 u in
-  (subst_univs_level_universe s u, s')
 
 (** Pretty-printing *)
 

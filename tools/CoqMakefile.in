@@ -307,6 +307,14 @@ else
   TIMING_ARG=
 endif
 
+ifneq (,$(PROFILING))
+  PROFILE_ARG=-profile $<.prof.json
+  PROFILE_ZIP=gzip $<.prof.json
+else
+  PROFILE_ARG=
+  PROFILE_ZIP=true
+endif
+
 # Files #######################################################################
 #
 # We here define a bunch of variables about the files being part of the
@@ -598,17 +606,14 @@ beautify: $(BEAUTYFILES)
 $(file >.hasfile,1)
 HASFILE:=$(shell if [ -e .hasfile ]; then echo 1; rm .hasfile; fi)
 
-.filestoinstall:
-	@:$(if $(HASFILE),$(file >$@,$(FILESTOINSTALL)),\
-	  $(shell rm -f $@) \
-	  $(foreach x,$(FILESTOINSTALL),$(shell printf '%s\n' "$x" >> $@)))
-
-
-.PHONY: .filestoinstall
+MKFILESTOINSTALL= $(if $(HASFILE),$(file >.filestoinstall,$(FILESTOINSTALL)),\
+  $(shell rm -f .filestoinstall) \
+  $(foreach x,$(FILESTOINSTALL),$(shell printf '%s\n' "$x" >> .filestoinstall)))
 
 # findlib needs the package to not be installed, so we remove it before
 # installing it (see the call to findlib_remove)
-install: META .filestoinstall
+install: META
+	@$(MKFILESTOINSTALL)
 	$(HIDE)code=0; for f in $$(cat .filestoinstall); do\
 	 if ! [ -f "$$f" ]; then >&2 echo $$f does not exist; code=1; fi \
 	done; exit $$code
@@ -625,6 +630,7 @@ install: META .filestoinstall
 	$(call findlib_remove)
 	$(call findlib_install, META $(FINDLIBFILESTOINSTALL))
 	$(HIDE)$(MAKE) install-extra -f "$(SELF)"
+	@rm -f .filestoinstall
 install-extra::
 	@# Extension point
 .PHONY: install install-extra
@@ -654,8 +660,9 @@ install-doc:: html mlihtml
 	done
 .PHONY: install-doc
 
-uninstall:: .filestoinstall
+uninstall::
 	@# Extension point
+	@$(MKFILESTOINSTALL)
 	$(call findlib_remove)
 	$(HIDE)for f in $$(cat .filestoinstall); do \
 	 df="`$(COQMKFILE) -destination-of "$$f" $(COQLIBS)`" &&\
@@ -668,6 +675,7 @@ uninstall:: .filestoinstall
 	 echo RMDIR "$(COQLIBINSTALL)/$$df/" &&\
 	 (rmdir "$(COQLIBINSTALL)/$$df/" 2>/dev/null || true); \
 	done
+	@rm -f .filestoinstall
 
 .PHONY: uninstall
 
@@ -810,7 +818,7 @@ define globvorule=
 # take care to $$ variables using $< etc
   $(1).vo $(1).glob &: $(1).v | $(VDFILE)
 	$(SHOW)COQC $(1).v
-	$(HIDE)$$(TIMER) $(COQC) $(COQDEBUG) $$(TIMING_ARG) $(COQFLAGS) $(COQLIBS) $(1).v
+	$(HIDE)$$(TIMER) $(COQC) $(COQDEBUG) $$(TIMING_ARG) $$(PROFILE_ARG) $(COQFLAGS) $(COQLIBS) $(1).v
 ifeq ($(COQDONATIVE), "yes")
 	$(SHOW)COQNATIVE $(1).vo
 	$(HIDE)$(call TIMER,$(1).vo.native) $(COQNATIVE) $(COQLIBS) $(1).vo
@@ -821,7 +829,8 @@ else
 
 $(VOFILES): %.vo: %.v | $(VDFILE)
 	$(SHOW)COQC $<
-	$(HIDE)$(TIMER) $(COQC) $(COQDEBUG) $(TIMING_ARG) $(COQFLAGS) $(COQLIBS) $<
+	$(HIDE)$(TIMER) $(COQC) $(COQDEBUG) $(TIMING_ARG) $(PROFILE_ARG) $(COQFLAGS) $(COQLIBS) $<
+	$(HIDE)$(PROFILE_ZIP)
 ifeq ($(COQDONATIVE), "yes")
 	$(SHOW)COQNATIVE $@
 	$(HIDE)$(call TIMER,$@.native) $(COQNATIVE) $(COQLIBS) $@

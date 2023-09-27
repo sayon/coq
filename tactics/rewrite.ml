@@ -370,14 +370,18 @@ end) = struct
         (app_poly env evd arrow [| a; b |]), unfold_impl n
 
   let rec decomp_pointwise env sigma n c =
-    if Int.equal n 0 then c
+    if Int.equal n 0 then Some c
     else
       match EConstr.kind sigma c with
       | App (f, [| a; b; relb |]) when isRefX env sigma (pointwise_relation_ref ()) f ->
         decomp_pointwise env sigma (pred n) relb
       | App (f, [| a; b; arelb |]) when isRefX env sigma (forall_relation_ref ()) f ->
         decomp_pointwise env sigma (pred n) (Reductionops.beta_applist sigma (arelb, [mkRel 1]))
-      | _ -> invalid_arg "decomp_pointwise"
+      | _ ->
+        (* cf #11347: when rewriting a commutative cut, we
+           decomp_pointwise on "c := eq (Prop -> Prop)"
+           Maybe if funext is available it's possible to do something? *)
+        None
 
   let rec apply_pointwise env sigma rel = function
     | arg :: args ->
@@ -440,7 +444,7 @@ end) = struct
 
   let unlift_cstr env sigma = function
     | None -> None
-    | Some codom -> Some (decomp_pointwise env (goalevars sigma) 1 codom)
+    | Some codom -> decomp_pointwise env (goalevars sigma) 1 codom
 
   (** Looking up declared rewrite relations (instances of [RewriteRelation]) *)
   let is_applied_rewrite_relation env sigma rels t =
@@ -1370,9 +1374,11 @@ module Strategies =
 
     let inj_open hint = (); fun sigma ->
       let (ctx, lemma) = Autorewrite.RewRule.rew_lemma hint in
+      let subst, ctx = UnivGen.fresh_universe_context_set_instance ctx in
+      let lemma = Vars.subst_univs_level_constr subst (EConstr.of_constr lemma) in
       (* not sure sideff:true is really needed here *)
-      let sigma = Evd.merge_context_set ~sideff:true UnivRigid sigma ctx in
-      (sigma, (EConstr.of_constr lemma, NoBindings))
+      let sigma = Evd.merge_context_set UnivRigid sigma ctx in
+      (sigma, (lemma, NoBindings))
 
     let old_hints (db : string) : 'a pure_strategy =
       let rules = Autorewrite.find_rewrites db in
@@ -1461,7 +1467,7 @@ let solve_constraints env (evars,cstrs) =
   Evd.set_typeclass_evars evars' oldtcs
 
 let nf_zeta =
-  Reductionops.clos_norm_flags (CClosure.RedFlags.mkflags [CClosure.RedFlags.fZETA])
+  Reductionops.clos_norm_flags (RedFlags.mkflags [RedFlags.fZETA])
 
 exception RewriteFailure of Environ.env * Evd.evar_map * pretype_error
 

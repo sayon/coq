@@ -504,11 +504,18 @@ module Search = struct
     | _, _ -> e
 
   (** Determine if backtracking is needed for this goal.
-      If the type class is unique or in Prop
-      and there are no evars in the goal then we do
-      NOT backtrack. *)
-  let needs_backtrack env evd unique concl =
-    if unique || is_Prop env evd concl then
+      We generally backtrack except in the following (possibly
+      overlapping) cases:
+      - [unique_instances] is [true].
+        This is the case when the goal's class has [Unique Instances].
+      - [indep] is [true] and the current goal has no evars.
+        [indep] is generally [true] and only gets set to [false] if the
+        current goal's evar is mentioned in other goals.
+        ([indep] is the negation of [search_dep].)
+      - The current goal is a [Prop] and has no evars. *)
+  let needs_backtrack env evd ~unique_instances ~indep concl =
+    if unique_instances then false else
+    if indep || is_Prop env evd concl then
       occur_existential evd concl
     else true
 
@@ -677,8 +684,9 @@ module Search = struct
     let env = Goal.env gl in
     let concl = Goal.concl gl in
     let sigma = Goal.sigma gl in
-    let unique = not info.search_dep || is_unique env sigma concl in
-    let backtrack = needs_backtrack env sigma unique concl in
+    let unique_instances = is_unique env sigma concl in
+    let indep = not info.search_dep in
+    let backtrack = needs_backtrack env sigma ~unique_instances ~indep concl in
     let () = ppdebug 0 (fun () ->
         pr_depth info.search_depth ++ str": looking for " ++
         Printer.pr_econstr_env (Goal.env gl) sigma concl ++
@@ -700,7 +708,11 @@ module Search = struct
     let idx = ref 1 in
     let foundone = ref false in
     let rec onetac e (tac, pat, b, name, pp) tl =
-      let derivs = path_derivate info.search_cut name in
+      let path = match name with
+      | None -> PathAny
+      | Some gr -> PathHints [gr]
+      in
+      let derivs = path_derivate info.search_cut path in
       let pr_error ie =
         ppdebug 1 (fun () ->
             let idx = if fst ie == NoApplicableHint then pred !idx else !idx in
@@ -1053,11 +1065,13 @@ module Search = struct
       ~depth ~dep:(unique || dep) hints in
     run_on_evars env evd p eauto_tac
 
-  let typeclasses_eauto env evd ?depth unique ~best_effort st hints p =
-    evars_eauto env evd depth true ~best_effort unique false st hints p
   (** Typeclasses eauto is an eauto which tries to resolve only
       goals of typeclass type, and assumes that the initially selected
       evars in evd are independent of the rest of the evars *)
+  let typeclasses_eauto env evd ?depth unique ~best_effort st hints p =
+    NewProfile.profile "typeclass search" (fun () ->
+        evars_eauto env evd depth true ~best_effort unique false st hints p)
+      ()
 
   let typeclasses_resolve env evd depth unique ~best_effort p =
     let db = searchtable_map typeclasses_db in
@@ -1310,3 +1324,15 @@ let autoapply c i =
       let sigma = Typeclasses.make_unresolvables
           (fun ev -> Typeclasses.all_goals ev (Lazy.from_val (snd (Evd.evar_source (Evd.find_undefined sigma ev))))) sigma in
       Proofview.Unsafe.tclEVARS sigma) end
+
+let resolve_tc c =
+  let open Proofview.Notations in
+  Proofview.tclENV >>= fun env ->
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let depth = get_typeclasses_depth () in
+  let unique = get_typeclasses_unique_solutions () in
+  let evars = Evarutil.undefined_evars_of_term sigma c in
+  let filter = (fun ev _ -> Evar.Set.mem ev evars) in
+  let fail = true in
+  let sigma = resolve_all_evars depth unique env (initial_select_evars filter) sigma fail in
+  Proofview.Unsafe.tclEVARS sigma

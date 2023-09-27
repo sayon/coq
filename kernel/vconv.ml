@@ -1,5 +1,4 @@
 open Util
-open Names
 open Environ
 open Conversion
 open Vm
@@ -8,6 +7,12 @@ open Vmvalues
 open Vmsymtable
 
 (* Test la structure des piles *)
+
+let table_key_instance env = function
+| ConstKey cst ->
+  let ctx = Environ.constant_context env cst in
+  Univ.AbstractContext.size ctx
+| RelKey _ | VarKey _ | EvarKey _ -> 0
 
 let compare_zipper z1 z2 =
   match z1, z2 with
@@ -90,28 +95,39 @@ and conv_atom env pb k a1 stk1 a2 stk2 cu =
 (*  Pp.(msg_debug (str "conv_atom(" ++ pr_atom a1 ++ str ", " ++ pr_atom a2 ++ str ")")) ; *)
   match a1, a2 with
   | Aind ((mi,_i) as ind1) , Aind ind2 ->
-    if Ind.CanOrd.equal ind1 ind2 && compare_stack stk1 stk2 then
+    if Names.Ind.CanOrd.equal ind1 ind2 && compare_stack stk1 stk2 then
       let ulen = Univ.AbstractContext.size (Environ.mind_context env mi) in
       if ulen = 0 then
         conv_stack env k stk1 stk2 cu
       else
         match stk1 , stk2 with
         | Zapp args1 :: stk1' , Zapp args2 :: stk2' ->
-          assert (ulen <= nargs args1);
-          assert (ulen <= nargs args2);
-          let u1 = Array.init ulen (fun i -> uni_lvl_val (arg args1 i)) in
-          let u2 = Array.init ulen (fun i -> uni_lvl_val (arg args2 i)) in
-          let u1 = Univ.Instance.of_array u1 in
-          let u2 = Univ.Instance.of_array u2 in
+          assert (0 < nargs args1);
+          assert (0 < nargs args2);
+          let u1 = uni_instance (arg args1 0) in
+          let u2 = uni_instance (arg args2 0) in
           let cu = convert_instances ~flex:false u1 u2 cu in
-          conv_arguments env ~from:ulen k args1 args2
+          conv_arguments env ~from:1 k args1 args2
             (conv_stack env k stk1' stk2' cu)
         | _, _ -> assert false (* Should not happen if problem is well typed *)
     else raise NotConvertible
   | Aid ik1, Aid ik2 ->
     if Vmvalues.eq_id_key ik1 ik2 && compare_stack stk1 stk2 then
+      let ulen = table_key_instance env ik1 in
+      if ulen = 0 then
         conv_stack env k stk1 stk2 cu
-      else raise NotConvertible
+      else
+        match stk1 , stk2 with
+        | Zapp args1 :: stk1' , Zapp args2 :: stk2' ->
+          assert (0 < nargs args1);
+          assert (0 < nargs args2);
+          let u1 = uni_instance (arg args1 0) in
+          let u2 = uni_instance (arg args2 0) in
+          let cu = convert_instances ~flex:false u1 u2 cu in
+          conv_arguments env ~from:1 k args1 args2
+            (conv_stack env k stk1' stk2' cu)
+        | _, _ -> assert false (* Should not happen if problem is well typed *)
+    else raise NotConvertible
   | Asort s1, Asort s2 ->
     sort_cmp_universes env pb s1 s2 cu
   | Asort _ , _ | Aind _, _ | Aid _, _ -> raise NotConvertible
@@ -194,7 +210,7 @@ let vm_conv_gen cv_pb sigma env univs t1 t2 =
     let v1 = val_of_constr env sigma t1 in
     let v2 = val_of_constr env sigma t2 in
     fst (conv_val env cv_pb (nb_rel env) v1 v2 univs)
-  with Not_found | Invalid_argument _ ->
+  with Not_found | Invalid_argument _ | Vmerrors.CompileError _ ->
     warn_bytecode_compiler_failed ();
     Conversion.generic_conv cv_pb ~l2r:false sigma.Genlambda.evars_val
       TransparentState.full env univs t1 t2
@@ -207,4 +223,9 @@ let vm_conv cv_pb env t1 t2 =
   in
   if not b then
     let state = (univs, checked_universes) in
-    let _ = vm_conv_gen cv_pb Genlambda.empty_evars env state t1 t2 in ()
+    let _ : UGraph.t =
+      NewProfile.profile "vm_conv" (fun () ->
+          vm_conv_gen cv_pb Genlambda.empty_evars env state t1 t2)
+        ()
+    in
+    ()

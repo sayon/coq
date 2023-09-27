@@ -116,9 +116,9 @@ term0: [
 | ident Prim.fields univ_annot
 | ident univ_annot
 | NUMBER
+| string
 | "(" term200 ")"
 | "{|" record_declaration bar_cbrace
-| "{" binder_constr "}"
 | "`{" term200 "}"
 | test_array_opening "[" "|" array_elems "|" lconstr type_cstr test_array_closing "|" "]" univ_annot
 | "`(" term200 ")"
@@ -166,7 +166,6 @@ arg: [
 
 atomic_constr: [
 | sort
-| string
 | "_"
 | "?" "[" identref "]"
 | "?" "[" pattern_ident "]"
@@ -1536,8 +1535,6 @@ simple_tactic: [
 | "exact_no_check" constr
 | "vm_cast_no_check" constr
 | "native_cast_no_check" constr
-| "casetype" constr
-| "elimtype" constr
 | "exfalso"
 | "lapply" constr
 | "transitivity" constr

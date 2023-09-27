@@ -13,9 +13,9 @@ open Synterp
 
 let vernac_pperr_endline = CDebug.create ~name:"vernacinterp" ()
 
-let interp_typed_vernac (Vernacextend.TypedVernac { inprog; outprog; inproof; outproof; run })
+let interp_typed_vernac (Vernactypes.TypedVernac { inprog; outprog; inproof; outproof; run })
     ~pm ~stack =
-  let open Vernacextend in
+  let open Vernactypes in
   let module LStack = Vernacstate.LemmaStack in
   let proof = Option.map LStack.get_top stack in
   let pm', proof' = run
@@ -104,32 +104,6 @@ let interp_control_entry ~loc (f : control_entry) ~st
   | ControlRedirect s ->
     Topfmt.with_output_to_file s (fun () -> fn ~st) ()
 
-let deprecated_nonuniform =
-  CWarnings.create ~name:"deprecated-nonuniform-attribute"
-    ~category:Deprecation.Version.v8_18
-    Pp.(fun () -> strbrk "Attribute '#[nonuniform]' is deprecated, \
-                          use '#[warning=\"-uniform-inheritance\"]' instead.")
-
-let warnings_att =
-  Attributes.attribute_of_list [
-    "warnings", Attributes.payload_parser ~cat:(^) ~name:"warnings";
-    "warning", Attributes.payload_parser ~cat:(^) ~name:"warning";
-  ]
-
-let with_generic_atts atts f =
-  let atts, warnings = Attributes.parse_with_extra warnings_att atts in
-  let atts, nonuniform = Attributes.parse_with_extra ComCoercion.nonuniform atts in
-  let warnings =
-    let () = if nonuniform <> None then deprecated_nonuniform () in
-    if nonuniform <> Some true then warnings else
-      let ui = "-uniform-inheritance" in
-      Some (match warnings with Some w -> w ^ "," ^ ui | None -> ui) in
-  match warnings with
-  | None -> f ~atts
-  | Some warnings ->
-    CWarnings.check_unknown_warnings warnings;
-    CWarnings.with_warn warnings (fun () -> f ~atts) ()
-
 (* "locality" is the prefix "Local" attribute, while the "local" component
  * is the outdated/deprecated "Local" attribute of some vernacular commands
  * still parsed as the obsolete_locality grammar entry for retrocompatibility.
@@ -183,7 +157,7 @@ and interp_control ~st ({ CAst.v = cmd; loc }) =
     cmd.control
     (fun ~st ->
        let before_univs = Global.universes () in
-       let pstack, pm = with_generic_atts cmd.attrs (fun ~atts ->
+       let pstack, pm = with_generic_atts ~check:false cmd.attrs (fun ~atts ->
            interp_expr ?loc ~atts ~st cmd.expr)
        in
        let after_univs = Global.universes () in
@@ -240,8 +214,8 @@ let interp_gen ~verbosely ~st ~interp_fn cmd =
 let interp ?(verbosely=true) ~st cmd =
   Vernacstate.unfreeze_full_state st;
   vernac_pperr_endline Pp.(fun () -> str "interpreting: " ++ Ppvernac.pr_vernac_expr cmd.CAst.v.expr);
-  let entry = Synterp.synterp_control cmd in
-  let interp = interp_gen ~verbosely ~st ~interp_fn:interp_control entry in
+  let entry = NewProfile.profile "synterp" (fun () -> Synterp.synterp_control cmd) () in
+  let interp = NewProfile.profile "interp" (fun () -> interp_gen ~verbosely ~st ~interp_fn:interp_control entry) () in
   Vernacstate.{ synterp = Vernacstate.Synterp.freeze (); interp }
 
 let interp_entry ?(verbosely=true) ~st entry =
@@ -252,5 +226,7 @@ let interp_qed_delayed_proof ~proof ~st ~control (CAst.{loc; v = pe } as e) : Ve
   let cmd = CAst.make ?loc { control; expr = VernacSynPure (VernacEndProof pe); attrs = [] } in
   let CAst.{ loc; v = entry } = Synterp.synterp_control cmd in
   let control = entry.control in
-  interp_gen ~verbosely:false ~st
-    ~interp_fn:(interp_qed_delayed_control ~proof ~control) e
+  NewProfile.profile "interp-delayed-qed" (fun () ->
+      interp_gen ~verbosely:false ~st
+        ~interp_fn:(interp_qed_delayed_control ~proof ~control) e)
+    ()

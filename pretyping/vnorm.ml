@@ -28,7 +28,7 @@ module NamedDecl = Context.Named.Declaration
 (* Calcul de la forme normal d'un terme    *)
 (*******************************************)
 
-let e_whd_all = Reductionops.clos_whd_flags CClosure.all
+let e_whd_all = Reductionops.clos_whd_flags RedFlags.all
 
 let crazy_type =  mkSet
 
@@ -203,14 +203,15 @@ and nf_univ_args ~nb_univs mk env sigma stk =
     if Int.equal nb_univs 0 then Univ.Instance.empty
     else match stk with
     | Zapp args :: _ ->
-       let inst =
-         Array.init nb_univs (fun i -> uni_lvl_val (arg args i))
-       in
-       Univ.Instance.of_array inst
+      let inst = arg args 0 in
+      let inst = uni_instance inst in
+      let () = assert (Int.equal (Univ.Instance.length inst) nb_univs) in
+      inst
     | _ -> assert false
   in
   let (t,ty) = mk u in
-  nf_stk ~from:nb_univs env sigma t ty stk
+  let from = if Int.equal nb_univs 0 then 0 else 1 in
+  nf_stk ~from env sigma t ty stk
 
 and nf_evar env sigma evk stk =
   let evi = try Evd.find_undefined sigma evk with Not_found -> assert false in
@@ -338,27 +339,36 @@ and nf_predicate env sigma ind mip params v pctx =
   let rel = Retyping.relevance_of_type env sigma (EConstr.of_constr body) in
   body, rel
 
+and nf_telescope env sigma len f typ =
+  let open CClosure in
+  let t = ref (inject typ) in
+  let infos = Evarutil.create_clos_infos env sigma RedFlags.all in
+  let tab = create_tab () in
+  let init i =
+    let typ, stk = whd_stack infos tab !t [] in
+    let typ = zip typ stk in
+    match fterm_of typ with
+    | FProd (na, dom, codom, e) ->
+      let arg = f i in
+      let dom = term_of_fconstr dom in
+      let arg = nf_val env sigma arg dom in
+      let () = t := mk_clos (CClosure.usubs_cons (inject arg) e) codom in
+      arg
+    | _ -> assert false
+  in
+  let args = Array.init len init in
+  !t, args
+
 and nf_args env sigma vargs ?from:(f=0) t =
-  let t = ref t in
   let len = nargs vargs - f in
-  let args =
-    Array.init len
-      (fun i ->
-        let _,dom,codom = decompose_prod env sigma !t in
-        let c = nf_val env sigma (arg vargs (f+i)) dom in
-        t := subst1 c codom; c) in
-  !t,args
+  let fargs i = arg vargs (f + i) in
+  let typ, args = nf_telescope env sigma len fargs t in
+  CClosure.term_of_fconstr typ, args
 
 and nf_bargs env sigma b ofs t =
-  let t = ref t in
   let len = bsize b - ofs in
-  let args =
-    Array.init len
-      (fun i ->
-        let _,dom,codom = decompose_prod env sigma !t in
-        let c = nf_val env sigma (bfield b (i+ofs)) dom in
-        t := subst1 c codom; c) in
-  args
+  let fargs i = bfield b (i + ofs) in
+  snd @@ nf_telescope env sigma len fargs t
 
 and nf_fun env sigma f typ =
   let k = nb_rel env in

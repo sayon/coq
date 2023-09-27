@@ -94,7 +94,7 @@ let decompose_prod env t =
   in
   (name,dom,codom)
 
-let e_whd_all = Reductionops.clos_whd_flags CClosure.all
+let e_whd_all = Reductionops.clos_whd_flags RedFlags.all
 
 let app_type env sigma c =
   let t = e_whd_all env sigma c in
@@ -117,7 +117,7 @@ let construct_of_constr_notnative const env tag (ind,u) allargs =
   (mkApp(mkConstructU((ind,i),u), params), ctyp)
 
 let construct_of_constr const env sigma tag typ =
-  let typ = Reductionops.clos_whd_flags CClosure.all env sigma (EConstr.of_constr typ) in
+  let typ = Reductionops.clos_whd_flags RedFlags.all env sigma (EConstr.of_constr typ) in
   let t, l = decompose_app (EConstr.Unsafe.to_constr typ) in
   match Constr.kind t with
   | Ind indu ->
@@ -260,7 +260,7 @@ and nf_args env sigma args t =
     let c = nf_val env sigma arg dom in
     (subst1 c codom, c::l)
   in
-  let t,l = Array.fold_right aux args (t,[]) in
+  let t,l = List.fold_right aux args (t,[]) in
   t, List.rev l
 
 and nf_bargs env sigma b t =
@@ -323,7 +323,7 @@ and nf_atom_type env sigma atom =
         let nas = List.rev_map get_annot realdecls @ [nameR (Id.of_string "c")] in
         expand_arity (mib, mip) (ind, u) params (Array.of_list nas)
       in
-      let p = nf_predicate env sigma ind mip params p pctx in
+      let p, relevance = nf_predicate env sigma ind mip params p pctx in
       (* Calcul du type des branches *)
       let btypes = build_branches_type env sigma mib mip (ind, u) params (pctx, p) in
       (* calcul des branches *)
@@ -336,8 +336,8 @@ and nf_atom_type env sigma atom =
       let branchs = Array.mapi mkbranch bsw in
       let tcase = build_case_type (pctx, p) realargs a in
       let p = (get_case_annot pctx, p) in
-      let ci = ans.asw_ci in
-      let iv = if Typeops.should_invert_case env ans.asw_ci then
+      let ci = Inductiveops.make_case_info env ind relevance RegularStyle in
+      let iv = if Typeops.should_invert_case env ci then
           CaseInvert {indices=realargs}
         else NoInvert
       in
@@ -388,7 +388,8 @@ and nf_predicate env sigma ind mip params v pctx =
   let (_, v) = List.fold_right fold pctx (nb_rel env, v) in
   let env = push_rel_context pctx env in
   let body = nf_type env sigma v in
-  body
+  let rel = Retyping.relevance_of_type env sigma (EConstr.of_constr body) in
+  body, rel
 
 and nf_evar env sigma evk args =
   let evi = try Evd.find_undefined sigma evk with Not_found -> assert false in
@@ -406,7 +407,7 @@ and nf_evar env sigma evk args =
     let fold accu d = EConstr.mkNamedProd_or_LetIn sigma d accu in
     let t = List.fold_left fold ty hyps in
     let t = EConstr.to_constr ~abort_on_undefined_evars:false sigma t in
-    let ty, args = nf_args env sigma args t in
+    let ty, args = nf_args env sigma (Array.to_list args) t in
     (* nf_args takes arguments in the reverse order but produces them
        in the correct one, so we have to reverse them again for the
        evar node *)

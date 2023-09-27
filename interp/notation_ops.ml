@@ -72,6 +72,13 @@ let rec alpha_var id1 id2 = function
    in NList and NBinderList, since the iterator has its own variable *)
 let replace_var i j var = j :: List.remove Id.equal i var
 
+let eq_rigid a b =
+  let open UState in
+  match a, b with
+  | UnivRigid, UnivRigid -> true
+  | UnivFlexible a, UnivFlexible b -> (a:bool) = b
+  | (UnivRigid | UnivFlexible _), _ -> false
+
 (* compare_glob_universe_instances true strictly_lt us1 us2 computes us1 <= us2,
    compare_glob_universe_instances false strictly_lt us1 us2 computes us1 = us2.
    strictly_lt will be set to true if any part is strictly less. *)
@@ -83,9 +90,7 @@ let compare_glob_universe_instances lt strictly_lt us1 us2 =
   | Some l1, Some l2 ->
      CList.for_all2eq (fun u1 u2 ->
          match u1, u2 with
-         | UAnonymous {rigid=true}, UAnonymous {rigid=true} -> true
-         | UAnonymous {rigid=false}, UAnonymous {rigid=false} -> true
-         | UAnonymous _, UAnonymous _ -> false
+         | UAnonymous {rigid}, UAnonymous {rigid=rigid'} -> eq_rigid rigid rigid'
          | UNamed _, UAnonymous _ -> strictly_lt := true; lt
          | UAnonymous _, UNamed _ -> false
          | UNamed _, UNamed _ -> glob_level_eq u1 u2) l1 l2
@@ -536,9 +541,7 @@ let check_pair_matching ?loc x y x' y' revert revert' =
        strbrk " while " ++ Id.print x' ++ strbrk " matching " ++ Id.print y' ++
        strbrk " was first found.")
 
-let pair_equal eq1 eq2 (a,b) (a',b') = eq1 a a' && eq2 b b'
-
-let mem_recursive_pair (x,y) l = List.mem_f (pair_equal Id.equal Id.equal) (x,y) l
+let mem_recursive_pair (x,y) l = List.mem_f (eq_pair Id.equal Id.equal) (x,y) l
 
 type recursive_pattern_kind =
 | RecursiveTerms of bool (* in reverse order *)
@@ -591,13 +594,13 @@ let compare_recursive_parts recvars found f f' (iterator,subc) =
         aux c term
       | Some (x', y', RecursiveBinders revert') ->
         check_pair_matching ?loc:c1.CAst.loc x y x' y' revert revert';
-        true
+        aux c term
       | Some (x', y', RecursiveTerms revert') ->
         (* Recursive binders have precedence: they can be coerced to
            terms but not reciprocally *)
         check_pair_matching ?loc:c1.CAst.loc x y x' y' revert revert';
         let () = diff := Some (x, y, RecursiveBinders revert) in
-        true
+        aux c term
       end
   | _ ->
       mk_glob_constr_eq aux c1 c2 in
@@ -616,14 +619,14 @@ let compare_recursive_parts recvars found f f' (iterator,subc) =
           f' (if revert then iterator else subst_glob_vars [x, DAst.make @@ GVar y] iterator) in
         (* found variables have been collected by compare_constr *)
         found := { !found with vars = List.remove Id.equal y (!found).vars;
-                               recursive_term_vars = List.add_set (pair_equal Id.equal Id.equal) (x,y) (!found).recursive_term_vars };
+                               recursive_term_vars = List.add_set (eq_pair Id.equal Id.equal) (x,y) (!found).recursive_term_vars };
         NList (x,y,iterator,f (Option.get !terminator),revert)
     | Some (x,y,RecursiveBinders revert) ->
         let iterator =
           f' (if revert then iterator else subst_glob_vars [x, DAst.make @@ GVar y] iterator) in
         (* found have been collected by compare_constr *)
         found := { !found with vars = List.remove Id.equal y (!found).vars;
-                               recursive_binders_vars = List.add_set (pair_equal Id.equal Id.equal) (x,y) (!found).recursive_binders_vars };
+                               recursive_binders_vars = List.add_set (eq_pair Id.equal Id.equal) (x,y) (!found).recursive_binders_vars };
         NBinderList (x,y,iterator,f (Option.get !terminator),revert)
   else
     raise Not_found
@@ -958,29 +961,29 @@ let rec push_context_binders vars = function
     push_context_binders vars bl
 
 let is_term_meta id metas =
-  try match Id.List.assoc id metas with _,(NtnTypeConstr | NtnTypeConstrList) -> true | _ -> false
+  try match Id.List.assoc id metas with NtnTypeConstr | NtnTypeConstrList -> true | _ -> false
   with Not_found -> false
 
 let is_onlybinding_strict_meta id metas =
-  try match Id.List.assoc id metas with _,NtnTypeBinder (NtnBinderParsedAsSomeBinderKind AsStrictPattern) -> true | _ -> false
+  try match Id.List.assoc id metas with NtnTypeBinder (NtnBinderParsedAsSomeBinderKind AsStrictPattern) -> true | _ -> false
   with Not_found -> false
 
 let is_onlybinding_meta id metas =
-  try match Id.List.assoc id metas with _,NtnTypeBinder _ -> true | _ -> false
+  try match Id.List.assoc id metas with NtnTypeBinder _ -> true | _ -> false
   with Not_found -> false
 
 let is_onlybinding_pattern_like_meta isvar id metas =
   try match Id.List.assoc id metas with
-    | _,NtnTypeBinder (NtnBinderParsedAsConstr (AsAnyPattern | AsStrictPattern)) -> true
-    | _,NtnTypeBinder (NtnBinderParsedAsSomeBinderKind AsStrictPattern | NtnBinderParsedAsBinder) -> not isvar
-    | _,NtnTypeBinder (NtnBinderParsedAsSomeBinderKind AsAnyPattern) -> true
-    | _,NtnTypeBinder (NtnBinderParsedAsSomeBinderKind (AsIdent | AsName)) -> false
-    | _,NtnTypeBinder (NtnBinderParsedAsConstr (AsIdent | AsName)) -> false
-    | _,NtnTypeBinderList _ | _,NtnTypeConstr | _,NtnTypeConstrList -> false
+    | NtnTypeBinder (NtnBinderParsedAsConstr (AsAnyPattern | AsStrictPattern)) -> true
+    | NtnTypeBinder (NtnBinderParsedAsSomeBinderKind AsStrictPattern | NtnBinderParsedAsBinder) -> not isvar
+    | NtnTypeBinder (NtnBinderParsedAsSomeBinderKind AsAnyPattern) -> true
+    | NtnTypeBinder (NtnBinderParsedAsSomeBinderKind (AsIdent | AsName)) -> false
+    | NtnTypeBinder (NtnBinderParsedAsConstr (AsIdent | AsName)) -> false
+    | NtnTypeBinderList _ | NtnTypeConstr | NtnTypeConstrList -> false
   with Not_found -> false
 
 let is_bindinglist_meta id metas =
-  try match Id.List.assoc id metas with _,NtnTypeBinderList _ -> true | _ -> false
+  try match Id.List.assoc id metas with NtnTypeBinderList _ -> true | _ -> false
   with Not_found -> false
 
 exception No_match
@@ -1317,9 +1320,9 @@ let remove_sigma x (terms,termlists,binders,binderlists) =
 let remove_bindinglist_sigma x (terms,termlists,binders,binderlists) =
   (terms,termlists,binders,Id.List.remove_assoc x binderlists)
 
-let add_ldots_var metas = (ldots_var,((constr_some_level,([],[])),NtnTypeConstr))::metas
+let add_ldots_var metas = (ldots_var,NtnTypeConstr)::metas
 
-let add_meta_bindinglist x metas = (x,((constr_some_level,([],[])),NtnTypeBinderList (*arbitrary:*) NtnBinderParsedAsBinder))::metas
+let add_meta_bindinglist x metas = (x,NtnTypeBinderList (*arbitrary:*) NtnBinderParsedAsBinder)::metas
 
 (* This tells if letins in the middle of binders should be included in
    the sequence of binders *)
@@ -1365,7 +1368,7 @@ let match_binderlist match_iter_fun match_termin_fun alp metas sigma rest x y it
   let alp,sigma = bind_bindinglist_env alp sigma x bl in
   match_termin_fun alp metas sigma rest termin
 
-let add_meta_term x metas = (x,((constr_some_level,([],[])),NtnTypeConstr))::metas (* Should reuse the scope of the partner of x! *)
+let add_meta_term x metas = (x,NtnTypeConstr)::metas
 
 let match_termlist match_fun alp metas sigma rest x y iter termin revert =
   let rec aux alp sigma acc rest =
@@ -1402,6 +1405,11 @@ let does_not_come_from_already_eta_expanded_var glob =
   (* optimally (whether other looping situations can occur remains to be *)
   (* checked). *)
   match DAst.get glob with GVar _ -> false | _ -> true
+
+let eta_well_typed pat =
+  (* A criterion for well-typedness of the eta-expansion
+     is that the head of the pattern is rigid (see #15221) *)
+  match pat with NVar _ -> false | _ -> true
 
 let is_var_term = function
   (* The kind of expressions allowed to be both a term and a binding variable *)
@@ -1446,7 +1454,7 @@ let rec match_ inner u alp metas sigma a1 a2 =
         else if n1 > n2 then
           let l11,l12 = List.chop (n1-n2) l1 in DAst.make ?loc @@ GApp (f1,l11),l12, f2,l2
         else f1,l1, f2, l2 in
-      let may_use_eta = does_not_come_from_already_eta_expanded_var f1 in
+      let may_use_eta = does_not_come_from_already_eta_expanded_var f1 && eta_well_typed f2 in
       List.fold_left2 (match_ may_use_eta u alp metas)
         (match_hd u alp metas sigma f1 f2) l1 l2
   | GProj ((cst1,u1),l1,a1), NProj ((cst2,u2),l2,a2) when GlobRef.CanOrd.equal (GlobRef.ConstRef cst1) (GlobRef.ConstRef cst2) && compare_glob_universe_instances_le u1 u2 ->
@@ -1625,7 +1633,7 @@ and match_disjunctive_equations u alp metas sigma {CAst.v=(ids,disjpatl1,rhs1)} 
    substitution based on entry production: indeed some binders may
    have to be seen as terms from the parsing/printing point of view *)
 let group_by_type ids (terms,termlists,binders,binderlists) =
-  List.fold_right (fun (x,(scl,typ)) (terms',termlists',binders',binderlists') ->
+  List.fold_right (fun (x,(scl,_,typ)) (terms',termlists',binders',binderlists') ->
     match typ with
     | NtnTypeConstr ->
        (* term -> term *)
@@ -1664,7 +1672,8 @@ let group_by_type ids (terms,termlists,binders,binderlists) =
     ids ([],[],[],[])
 
 let match_notation_constr ~print_univ c ~vars (metas,pat) =
-  let subst = match_ false print_univ {actualvars=vars;staticbinders=[];renaming=[]} metas ([],[],[],[]) c pat in
+  let metatyps = List.map (fun (id,(_,_,typ)) -> (id,typ)) metas in
+  let subst = match_ false print_univ {actualvars=vars;staticbinders=[];renaming=[]} metatyps ([],[],[],[]) c pat in
   group_by_type metas subst
 
 (* Matching cases pattern *)
@@ -1737,17 +1746,21 @@ let match_ind_pattern metas sigma ind pats a2 =
   |_ -> raise No_match
 
 let reorder_canonically_substitution terms termlists metas =
-  List.fold_right (fun (x,(scl,typ)) (terms',termlists') ->
+  List.fold_right (fun (x,(scl,_,typ)) (terms',termlists',binders') ->
     match typ with
-      | NtnTypeConstr -> ((Id.List.assoc x terms, scl)::terms',termlists')
-      | NtnTypeConstrList -> (terms',(Id.List.assoc x termlists,scl)::termlists')
-      | NtnTypeBinder _ | NtnTypeBinderList _ -> anomaly (str "Unexpected binder in pattern notation."))
-    metas ([],[])
+      | NtnTypeConstr | NtnTypeBinder (NtnBinderParsedAsConstr _) -> ((Id.List.assoc x terms, scl)::terms',termlists',binders')
+      | NtnTypeConstrList -> (terms',(Id.List.assoc x termlists,scl)::termlists',binders')
+      | NtnTypeBinder (NtnBinderParsedAsBinder | NtnBinderParsedAsSomeBinderKind _) ->
+         (terms',termlists',(Id.List.assoc x terms, scl)::binders')
+      | NtnTypeBinderList _ -> anomaly (str "Unexpected binder in pattern notation."))
+    metas ([],[],[])
 
 let match_notation_constr_cases_pattern c (metas,pat) =
-  let (terms,termlists,(),()),more_args = match_cases_pattern metas ([],[],(),()) c pat in
+  let metatyps = List.map (fun (id,(_,_,typ)) -> (id,typ)) metas in
+  let (terms,termlists,(),()),more_args = match_cases_pattern metatyps ([],[],(),()) c pat in
   reorder_canonically_substitution terms termlists metas, more_args
 
 let match_notation_constr_ind_pattern ind args (metas,pat) =
-  let (terms,termlists,(),()),more_args = match_ind_pattern metas ([],[],(),()) ind args pat in
+  let metatyps = List.map (fun (id,(_,_,typ)) -> (id,typ)) metas in
+  let (terms,termlists,(),()),more_args = match_ind_pattern metatyps ([],[],(),()) ind args pat in
   reorder_canonically_substitution terms termlists metas, more_args

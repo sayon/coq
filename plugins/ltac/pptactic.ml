@@ -335,7 +335,7 @@ let string_of_genarg_arg (ArgumentType arg) =
   let pr_targ prtac symb arg = match symb with
   | Extend.Uentry tag when is_genarg tag (ArgumentType wit_tactic) ->
     prtac LevelSome arg
-  | Extend.Uentryl (_, l) -> prtac LevelSome arg
+  | Extend.Uentryl (_, l) -> prtac (LevelLe l) arg
   | _ ->
     match arg with
     | TacGeneric (isquot,arg) ->
@@ -1060,7 +1060,7 @@ let pr_goal_selector ~toplevel s =
               pr_with_comments ?loc (pr.pr_alias (level_of inherited) kn l), latom
           )
           in
-          if prec_less prec inherited then strm
+          if Notation.prec_less prec inherited then strm
           else str"(" ++ strm ++ str")"
 
         and pr_tacarg = function

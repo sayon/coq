@@ -1147,6 +1147,36 @@ and evar_eqappr_x ?(rhs_is_already_stuck = false) flags env evd pbty
           |Some (sk1',sk2'), Success i' -> evar_conv_x flags env i' CONV (Stack.zip i' (term1,sk1')) (Stack.zip i' (term2,sk2'))
           end
 
+        | Proj (p1,c1), Proj(p2,c2) when QProjection.Repr.equal env (Projection.repr p1) (Projection.repr p2) ->
+          begin match ise_stack2 true env evd (evar_conv_x flags) sk1 sk2 with
+          |_, (UnifFailure _ as x) -> x
+          |None, Success i' -> evar_conv_x flags env i' CONV c1 c2
+          |Some _, Success _ -> UnifFailure (evd,NotSameHead)
+          end
+
+        (* Catch the c.(p) ~= p c' cases *)
+        | Proj (p1,c1), Const (p2,_) when QConstant.equal env (Projection.constant p1) p2 ->
+          let c1 =
+            try Some (destApp evd (Retyping.expand_projection env evd p1 c1 []))
+            with Retyping.RetypeError _ -> None
+          in
+          begin match c1 with
+          | Some (c1,new_args) ->
+            rigids env evd (Stack.append_app new_args sk1) c1 sk2 term2
+          | None -> UnifFailure (evd,NotSameHead)
+          end
+
+        | Const (p1,_), Proj (p2,c2) when QConstant.equal env p1 (Projection.constant p2) ->
+          let c2 =
+            try Some (destApp evd (Retyping.expand_projection env evd p2 c2 []))
+            with Retyping.RetypeError _ -> None
+          in
+          begin match c2 with
+          | Some (c2,new_args) ->
+            rigids env evd sk1 term1 (Stack.append_app new_args sk2) c2
+          | None -> UnifFailure (evd,NotSameHead)
+          end
+
         | (Ind _ | Sort _ | Prod _ | CoFix _ | Fix _ | Rel _ | Var _ | Const _ | Int _ | Float _ | Array _ | Evar _ | Lambda _), _ ->
           UnifFailure (evd,NotSameHead)
         | _, (Ind _ | Sort _ | Prod _ | CoFix _ | Fix _ | Rel _ | Var _ | Const _ | Int _ | Array _ | Evar _ | Lambda _) ->
@@ -1751,29 +1781,17 @@ let check_problems_are_solved env evd =
   | (pbty,env,t1,t2) as pb::_ -> error_cannot_unify env evd pb t1 t2
   | _ -> ()
 
-exception MaxUndefined of (Evar.t * undefined evar_info * EConstr.t list)
-
-let max_undefined_with_candidates evd =
-  let fold evk evi () = match Evd.evar_candidates evi with
-  | None -> ()
-  | Some l -> raise (MaxUndefined (evk, evi, l))
-  in
-  (* [fold_right] traverses the undefined map in decreasing order of
-     indices.  The evar with candidates of maximum index is thus the
-     first evar with candidates found by a [fold_right]
-     traversal. This has a significant impact on performance. *)
-  try
-    let () = Evar.Map.fold_right fold (Evd.undefined_map evd) () in
-    None
-  with MaxUndefined ans ->
-    Some ans
-
 let rec solve_unconstrained_evars_with_candidates flags env evd =
   (* max_undefined is supposed to return the most recent, hence
      possibly most dependent evar *)
-  match max_undefined_with_candidates evd with
+  match Evd.max_undefined_with_candidates evd with
   | None -> evd
-  | Some (evk,ev_info,l) ->
+  | Some evk ->
+      let ev_info = Evd.find_undefined evd evk in
+      let l = match evar_candidates ev_info with
+      | None -> assert false
+      | Some l -> l
+      in
       let rec aux = function
       | [] -> user_err Pp.(str "Unsolvable existential variables.")
       | a::l ->
@@ -1840,6 +1858,11 @@ let solve_unif_constraints_with_heuristics env
 (* Main entry points *)
 
 exception UnableToUnify of evar_map * unification_error
+
+let evar_conv_x flags env evd pb x1 x2 : unification_result =
+  NewProfile.profile "unification" (fun () ->
+      evar_conv_x flags env evd pb x1 x2)
+    ()
 
 let unify_delay ?flags env evd t1 t2 =
   let flags =

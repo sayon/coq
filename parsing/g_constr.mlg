@@ -109,8 +109,8 @@ GRAMMAR EXTEND Gram
     [ [ "Set"  -> { UNamed (None, [CSet, 0]) }
       | "Prop" -> { UNamed (None, [CProp, 0]) }
       | "SProp" -> { UNamed (None, [CSProp, 0]) }
-      | "Type" -> { UAnonymous {rigid=true} }
-      | "Type"; "@{"; "_"; "}" -> { UAnonymous {rigid=false} }
+      | "Type" -> { UAnonymous {rigid=UnivRigid} }
+      | "Type"; "@{"; "_"; "}" -> { UAnonymous {rigid=UnivFlexible false} }
       | "Type"; "@{"; u = universe; "}" -> { UNamed (None, u) } ] ]
   ;
   sort_family:
@@ -182,6 +182,7 @@ GRAMMAR EXTEND Gram
       | id = ident; i = univ_annot ->
         { CAst.make ~loc @@ CRef (qualid_of_ident ~loc id, i) }
       | n = NUMBER-> { CAst.make ~loc @@ CPrim (Number (NumTok.SPlus,n)) }
+      | s = string -> { CAst.make ~loc @@ CPrim (String s) }
       | "("; c = term LEVEL "200"; ")" ->
         { (* Preserve parentheses around numbers so that constrintern does not
              collapse -(3) into the number -3. *)
@@ -190,8 +191,6 @@ GRAMMAR EXTEND Gram
                 CAst.make ~loc @@ CNotation(None,(InConstrEntry,"( _ )"),([c],[],[],[]))
             | _ -> c) }
       | "{|"; c = record_declaration; bar_cbrace -> { c }
-      | "{"; c = binder_constr ; "}" ->
-        { CAst.make ~loc @@ CNotation(None,(InConstrEntry,"{ _ }"),([c],[],[],[])) }
       | "`{"; c = term LEVEL "200"; "}" ->
         { CAst.make ~loc @@ CGeneralization (MaxImplicit, c) }
       | test_array_opening; "["; "|"; ls = array_elems; "|"; def = lconstr; ty = type_cstr; test_array_closing; "|"; "]"; u = univ_annot ->
@@ -268,7 +267,6 @@ GRAMMAR EXTEND Gram
   ;
   atomic_constr:
     [ [ s = sort   -> { CAst.make ~loc @@ CSort s }
-      | s = string -> { CAst.make ~loc @@ CPrim (String s) }
       | "_"      -> { CAst.make ~loc @@ CHole (None, IntroAnonymous) }
       | "?"; "["; id = identref; "]"  -> { CAst.make ~loc @@  CHole (None, IntroIdentifier id.CAst.v) }
       | "?"; "["; id = pattern_ident; "]"  -> { CAst.make ~loc @@  CHole (None, IntroFresh id.CAst.v) }
@@ -289,8 +287,8 @@ GRAMMAR EXTEND Gram
     [ [ "Set" -> { UNamed CSet }
       (* no parsing SProp as a level *)
       | "Prop" -> { UNamed CProp }
-      | "Type" -> { UAnonymous {rigid=true} }
-      | "_" -> { UAnonymous {rigid=false} }
+      | "Type" -> { UAnonymous {rigid=UnivRigid} }
+      | "_" -> { UAnonymous {rigid=UnivFlexible false} }
       | id = global -> { UNamed (CType id) } ] ]
   ;
   fix_decls:
@@ -375,7 +373,7 @@ GRAMMAR EXTEND Gram
              collapse -(3) into the number -3. *)
           match p.CAst.v with
           | CPatPrim (Number (NumTok.SPlus,n)) ->
-              CAst.make ~loc @@ CPatNotation(None,(InConstrEntry,"( _ )"),([p],[]),[])
+              CAst.make ~loc @@ CPatNotation(None,(InConstrEntry,"( _ )"),([p],[],[]),[])
           | _ -> p }
       | "("; p = pattern LEVEL "200"; "|" ; pl = LIST1 pattern LEVEL "200" SEP "|"; ")" ->
         { CAst.make ~loc @@ CPatOr (p::pl) }

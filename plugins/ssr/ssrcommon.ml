@@ -122,7 +122,7 @@ let mkRApp f args = if args = [] then f else DAst.make @@ GApp (f, args)
 let mkRVar id = DAst.make @@ GRef (GlobRef.VarRef id,None)
 let mkRltacVar id = DAst.make @@ GVar (id)
 let mkRCast rc rt =  DAst.make @@ GCast (rc, Some DEFAULTcast, rt)
-let mkRType =  DAst.make @@ GSort (UAnonymous {rigid=true})
+let mkRType =  DAst.make @@ GSort (UAnonymous {rigid=UnivRigid})
 let mkRProp =  DAst.make @@ GSort (UNamed (None, [GProp, 0]))
 let mkRArrow rt1 rt2 = DAst.make @@ GProd (Anonymous, Explicit, rt1, rt2)
 let mkRConstruct c = DAst.make @@ GRef (GlobRef.ConstructRef c,None)
@@ -155,7 +155,7 @@ let splay_open_constr env (sigma, c) =
   Reductionops.hnf_decompose_prod env sigma t
 
 let isAppInd env sigma c =
-  let c = Reductionops.clos_whd_flags CClosure.all env sigma c in
+  let c = Reductionops.clos_whd_flags RedFlags.all env sigma c in
   let c, _ = EConstr.decompose_app sigma c in
   EConstr.isInd sigma c
 
@@ -719,7 +719,7 @@ open Util
 
 (** Constructors for constr_expr *)
 let mkCProp loc = CAst.make ?loc @@ CSort (UNamed (None, [CProp, 0]))
-let mkCType loc = CAst.make ?loc @@ CSort (UAnonymous {rigid=true})
+let mkCType loc = CAst.make ?loc @@ CSort (UAnonymous {rigid=UnivRigid})
 let mkCVar ?loc id = CAst.make ?loc @@ CRef (qualid_of_ident ?loc id, None)
 let rec mkCHoles ?loc n =
   if n <= 0 then [] else (CAst.make ?loc @@ CHole (None, Namegen.IntroAnonymous)) :: mkCHoles ?loc (n - 1)
@@ -1117,7 +1117,7 @@ let clr_of_wgen gen clrs = match gen with
 let reduct_in_concl ~check t = Tactics.reduct_in_concl ~cast:false ~check (t, DEFAULTcast)
 let unfold cl =
   Proofview.tclEVARMAP >>= fun sigma ->
-  let module R = Reductionops in let module F = CClosure.RedFlags in
+  let module R = Reductionops in let module F = RedFlags in
   let flags = F.mkflags [F.fBETA; F.fMATCH; F.fFIX; F.fCOFIX; F.fDELTA] in
   let fold accu c = F.red_add accu (F.fCONST (fst (EConstr.destConst sigma c))) in
   let flags = List.fold_left fold flags cl in
@@ -1331,8 +1331,8 @@ let tacDEST_CONST c =
  * to change that behaviour in the standard unfold code *)
 let unprotecttac =
   tacMK_SSR_CONST "protect_term" >>= tacDEST_CONST >>= fun prot ->
-  let open CClosure.RedFlags in
-  let flags = red_add_transparent CClosure.allnolet TransparentState.empty in
+  let open RedFlags in
+  let flags = red_add_transparent allnolet TransparentState.empty in
   let flags = red_add flags (fCONST prot) in
   Tacticals.onClause (fun idopt ->
     let hyploc = Option.map (fun id -> id, InHyp) idopt in

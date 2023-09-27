@@ -189,7 +189,6 @@ through the <tt>Require Import</tt> command.</p>
     theories/ZArith/Znumtheory.v
     theories/ZArith/Int.v
     theories/ZArith/Zpow_facts.v
-    theories/ZArith/Zdigits.v
     theories/ZArith/Zbitwise.v
   </dd>
 
@@ -280,7 +279,6 @@ through the <tt>Require Import</tt> command.</p>
     theories/Numbers/Cyclic/Int63/Uint63.v
     theories/Numbers/Cyclic/Int63/Sint63.v
     theories/Numbers/Cyclic/Int63/Ring63.v
-    theories/Numbers/Cyclic/ZModulo/ZModulo.v
     </dd>
 
     <dt> <b>&nbsp;&nbsp;Natural</b>:
@@ -697,7 +695,9 @@ through the <tt>Require Import</tt> command.</p>
     user-contrib/Ltac2/Proj.v
     user-contrib/Ltac2/Std.v
     user-contrib/Ltac2/String.v
+    user-contrib/Ltac2/TransparentState.v
     user-contrib/Ltac2/Uint63.v
+    user-contrib/Ltac2/Unification.v
   </dd>
 
   <dt> <b>Unicode</b>:

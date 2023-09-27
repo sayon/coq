@@ -2462,13 +2462,6 @@ let rec check_name_unicity env ok seen = let open CAst in function
      check_name_unicity env ok seen l
 | [] -> ()
 
-let fresh_wild ids =
-  let rec aux s =
-    if Id.Set.exists (fun id -> String.is_prefix s (Id.to_string id)) ids
-    then aux (s ^ "'")
-    else Id.of_string s in
-  aux "_H"
-
 let make_naming ?loc avoid l = function
   | IntroIdentifier id -> NamingMustBe (CAst.make ?loc id)
   | IntroAnonymous -> NamingAvoid (Id.Set.union avoid (explicit_intro_names l))
@@ -2478,7 +2471,7 @@ let rec make_naming_action avoid l = function
   (* In theory, we could use a tmp id like "wild_id" for all actions
      but we prefer to avoid it to avoid this kind of "ugly" names *)
   | IntroWildcard ->
-    NamingBasedOn (fresh_wild (Id.Set.union avoid (explicit_all_intro_names l)), Id.Set.empty)
+    NamingBasedOn (Id.of_string "_H", Id.Set.union avoid (explicit_all_intro_names l))
   | IntroApplyOn (_,{CAst.v=pat;loc}) -> make_naming_pattern avoid ?loc l pat
   | (IntroOrAndPattern _ | IntroInjection _ | IntroRewrite _) as pat ->
     NamingAvoid(Id.Set.union avoid (explicit_intro_names ((CAst.make @@ IntroAction pat)::l)))
@@ -3130,50 +3123,18 @@ let specialize_eqs id = Proofview.Goal.enter begin fun gl ->
     specialize_eqs id
 end
 
-(*
- *  Eliminations giving the type instead of the proof.
- * These tactics use the default elimination constant and
- * no substitutions at all.
- * May be they should be integrated into Elim ...
- *)
-
-let elim_type t =
-  Proofview.Goal.enter begin fun gl ->
-  let env = Proofview.Goal.env gl in
-  let (ind,t) = Tacmach.pf_apply reduce_to_atomic_ind gl t in
-  let evd, elimc = Tacmach.pf_apply find_ind_eliminator gl (fst ind)
-      (Tacticals.elimination_sort_of_goal gl)
-  in
-  let elimc = mkConstU elimc in
-  let elimt = Retyping.get_type_of env evd elimc in
-  let clause = mk_clenv_from env evd (elimc, elimt) in
-  let mv = List.last (clenv_arguments clause) in
-  let clause' =
-    (* t is inductive, then CUMUL or CONV is irrelevant *)
-    clenv_unify_meta_type ~flags:(elim_flags ()) Conversion.CUMUL t mv clause in
-  Proofview.tclTHEN (Proofview.Unsafe.tclEVARS evd) (Clenv.res_pf clause' ~flags:(elim_flags ()) ~with_evars:false)
-  end
-
-let case_type t =
-  assert_before_then_gen false (NamingAvoid Id.Set.empty) t begin fun id ->
-  Proofview.Goal.enter begin fun gl ->
-  let sigma = Proofview.Goal.sigma gl in
-  let env = Tacmach.pf_env gl in
-  let ((ind, u), t) = reduce_to_atomic_ind env sigma t in
-  let dep = default_case_analysis_dependence env ind in
-  tclTHENLIST [
-    Clenv.case_pf ~with_evars:false ~dep (mkVar id, t);
-    clear [id];
-  ]
-  end
-  end
-
 let exfalso =
   Proofview.Goal.enter begin fun gl ->
     let env = Proofview.Goal.env gl in
     let sigma = Proofview.Goal.sigma gl in
     let (sigma, f) = Evd.fresh_global env sigma (Coqlib.lib_ref "core.False.type") in
-    Proofview.Unsafe.tclEVARS sigma <*> elim_type f
+    let (ind, _) = reduce_to_atomic_ind env sigma f in
+    let s = Retyping.get_sort_family_of env sigma (Proofview.Goal.concl gl) in
+    let sigma, elimc = find_ind_eliminator env sigma (fst ind) s in
+    let elimc = mkConstU elimc in
+    let elimt = Retyping.get_type_of env sigma elimc in
+    let clause = mk_clenv_from env sigma (elimc, elimt) in
+    Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma) (Clenv.res_pf clause ~flags:(elim_flags ()) ~with_evars:false)
   end
 
 (************************************************)
@@ -3425,6 +3386,19 @@ let unify ?(state=TransparentState.full) x y =
     Proofview.tclZERO ~info (PretypeError (env, sigma, CannotUnify (x, y, None)))
   end
 
+let evarconv_unify ?(state=TransparentState.full) ?(with_ho=true) x y =
+  Proofview.Goal.enter begin fun gl ->
+  let env = Proofview.Goal.env gl in
+  let sigma = Proofview.Goal.sigma gl in
+  try
+    let flags = Evarconv.default_flags_of state in
+    let sigma = Evarconv.unify ~flags ~with_ho env sigma Conversion.CONV x y in
+    Proofview.Unsafe.tclEVARS sigma
+  with e when noncritical e ->
+    let e, info = Exninfo.capture e in
+    Proofview.tclZERO ~info (PretypeError (env, sigma, CannotUnify (x, y, None)))
+  end
+
 (** [tclWRAPFINALLY before tac finally] runs [before] before each
     entry-point of [tac] and passes the result of [before] to
     [finally], which is then run at each exit-point of [tac],
@@ -3521,8 +3495,7 @@ end
 let reduce_after_refine =
   (* For backward compatibility reasons, we do not contract let-ins, but we unfold them. *)
   let redfun env t =
-    let open CClosure in
-    let flags = RedFlags.red_add_transparent allnolet TransparentState.empty in
+    let flags = RedFlags.red_add_transparent RedFlags.allnolet TransparentState.empty in
     clos_norm_flags flags env t
   in
   reduct_in_concl ~cast:false ~check:false (redfun,DEFAULTcast)

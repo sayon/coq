@@ -166,7 +166,7 @@ let out_word env b1 b2 b3 b4 =
     else
       let new_len = min (Sys.max_string_length) (2 * len) in
       (* Not the right exception... *)
-      let () = if not (p + 3 < new_len) then invalid_arg "String.create" in
+      let () = if not (p + 3 < new_len) then Vmerrors.too_large_code() in
       let new_buffer = Bytes.create new_len in
       let () = Bytes.blit env.out_buffer 0 new_buffer 0 len in
       let () = env.out_buffer <- new_buffer in
@@ -475,8 +475,8 @@ type to_patch = emitcodes * patches
 (* Substitution *)
 let subst_strcst s sc =
   match sc with
-  | Const_sort _ | Const_b0 _ | Const_univ_level _ | Const_val _ | Const_uint _
-  | Const_float _ -> sc
+  | Const_sort _ | Const_b0 _ | Const_univ_level _ | Const_univ_instance _
+  | Const_val _ | Const_uint _ | Const_float _ | Const_evar _ -> sc
   | Const_ind ind -> let kn,i = ind in Const_ind (subst_mind s kn, i)
 
 let subst_annot _ (a : annot_switch) = a

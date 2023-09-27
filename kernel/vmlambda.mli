@@ -13,8 +13,6 @@ open Environ
 
 type lambda = structured_values Genlambda.lambda
 
-exception TooLargeInductive of Pp.t
-
 val lambda_of_constr : optimize:bool -> env -> Genlambda.evars -> Constr.t -> lambda
 
 (** Dump the VM lambda code after compilation (for debugging purposes) *)

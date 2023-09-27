@@ -42,29 +42,23 @@ function project {
 ########################################################################
 # MathComp
 ########################################################################
-project mathcomp "https://github.com/math-comp/math-comp" "mathcomp-1"
+project mathcomp "https://github.com/math-comp/math-comp" "master"
 
-project fourcolor "https://github.com/math-comp/fourcolor" "e831b0b00e264285f91938917a0a5ef64ec1a829"
-# put back master when testing MathComp 2
-# project fourcolor "https://github.com/math-comp/fourcolor" "master"
+project mathcomp_1 "https://github.com/math-comp/math-comp" "mathcomp-1"
 
-project oddorder "https://github.com/math-comp/odd-order" "2c03794e64eef467442a4ea2ef1430b13b0faa97"
-# put back master when testing MathComp 2
-# project oddorder "https://github.com/math-comp/odd-order" "master"
+project fourcolor "https://github.com/math-comp/fourcolor" "master"
 
-project mczify "https://github.com/math-comp/mczify" "2046446984f7b8c8f5102df4df6076b60874e688"
-# put back master when testing MathComp 2
-# project mczify "https://github.com/math-comp/mczify" "master"
+project oddorder "https://github.com/math-comp/odd-order" "master"
+
+project mczify "https://github.com/math-comp/mczify" "master"
 
 project finmap "https://github.com/math-comp/finmap" "cea9f088c9cddea1173bc2f7c4c7ebda35081b60"
-# put back master when testing MathComp 2
+# put back master when Analysis master moves to MathComp 2
 # project finmap "https://github.com/math-comp/finmap" "master"
 
 project bigenough "https://github.com/math-comp/bigenough" "master"
 
-project analysis "https://github.com/math-comp/analysis" "9193f4a1278409cc13a1de739adf3620aa24a638"
-# put back master when testing MathComp 2
-# project analysis "https://github.com/math-comp/analysis" "master"
+project analysis "https://github.com/math-comp/analysis" "master"
 
 ########################################################################
 # UniMath
@@ -108,11 +102,6 @@ project hott "https://github.com/HoTT/HoTT" "master"
 # CoqHammer
 ########################################################################
 project coqhammer "https://github.com/lukaszcz/coqhammer" "master"
-
-########################################################################
-# GeoCoq
-########################################################################
-project geocoq "https://github.com/GeoCoq/GeoCoq" "master"
 
 ########################################################################
 # Flocq
@@ -205,6 +194,11 @@ project bbv "https://github.com/mit-plv/bbv" "master"
 project bedrock2 "https://github.com/mit-plv/bedrock2" "tested"
 
 ########################################################################
+# Coinduction
+########################################################################
+project coinduction "https://github.com/damien-pous/coinduction" "master"
+
+########################################################################
 # coq-lsp
 ########################################################################
 project coq_lsp "https://github.com/ejgallego/coq-lsp" "main"
@@ -219,7 +213,7 @@ project equations "https://github.com/mattam82/Coq-Equations" "main"
 ########################################################################
 project elpi "https://github.com/LPCIC/coq-elpi" "coq-master"
 
-project hierarchy_builder "https://github.com/math-comp/hierarchy-builder" "coq-master"
+project hierarchy_builder "https://github.com/math-comp/hierarchy-builder" "master"
 
 ########################################################################
 # Engine-Bench
@@ -258,6 +252,11 @@ project reduction_effects "https://github.com/coq-community/reduction-effects" "
 project menhirlib "https://gitlab.inria.fr/fpottier/menhir" "20220210"
 
 ########################################################################
+# coq-neural-net-interp
+########################################################################
+project neural_net_interp "https://github.com/JasonGross/neural-net-coq-interp" "tested"
+
+########################################################################
 # aac_tactics
 ########################################################################
 project aac_tactics "https://github.com/coq-community/aac-tactics" "master"
@@ -271,6 +270,36 @@ project paco "https://github.com/snu-sf/paco" "master"
 # coq-itree
 ########################################################################
 project itree "https://github.com/DeepSpec/InteractionTrees" "master"
+
+########################################################################
+# coq-itree_io
+########################################################################
+project itree_io "https://github.com/Lysxia/coq-itree-io" "master"
+
+########################################################################
+# coq-ceres
+########################################################################
+project ceres "https://github.com/Lysxia/coq-ceres" "master"
+
+########################################################################
+# coq-parsec
+########################################################################
+project parsec "https://github.com/liyishuai/coq-parsec" "master"
+
+########################################################################
+# coq-json
+########################################################################
+project json "https://github.com/liyishuai/coq-json" "master"
+
+########################################################################
+# coq-async-test
+########################################################################
+project async_test "https://github.com/liyishuai/coq-async-test" "master"
+
+########################################################################
+# coq-http
+########################################################################
+project http "https://github.com/liyishuai/coq-http" "master"
 
 ########################################################################
 # paramcoq
@@ -338,7 +367,7 @@ project deriving "https://github.com/arthuraa/deriving" "master"
 ########################################################################
 # VsCoq
 ########################################################################
-project vscoq "https://github.com/coq-community/vscoq" "main"
+project vscoq "https://github.com/coq-community/vscoq" "coq-master"
 
 ########################################################################
 # category-theory
@@ -394,3 +423,8 @@ project tactician "https://github.com/coq-tactician/coq-tactician" "coqdev"
 # Ltac2 compiler
 ########################################################################
 project ltac2_compiler "https://github.com/SkySkimmer/coq-ltac2-compiler" "main"
+
+########################################################################
+# Waterproof
+########################################################################
+project waterproof "https://github.com/impermeable/coq-waterproof" "coq-master"

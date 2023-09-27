@@ -15,12 +15,15 @@ vernacexpr into a [vernac_control_entry]. *)
 open Names
 open Libnames
 
-val module_locality : bool Attributes.Notations.t
+val module_locality : bool Attributes.attribute
 
 val with_locality : atts:Attributes.vernac_flags -> (local:bool option -> 'a) -> 'a
 
 val with_module_locality :
   atts:Attributes.vernac_flags -> (module_local:bool -> 'a) -> 'a
+
+val with_generic_atts :
+  check:bool -> Attributes.vernac_flags -> (atts:Attributes.vernac_flags -> 'a) -> 'a
 
 type module_entry = Modintern.module_struct_expr * Names.ModPath.t * Modintern.module_kind * Entries.inline
 
@@ -57,7 +60,7 @@ type synterp_entry =
   | EVernacInclude of Declaremods.module_expr list
   | EVernacSetOption of { export : bool; key : Goptions.option_name; value : Vernacexpr.option_setting }
   | EVernacLoad of Vernacexpr.verbose_flag * (vernac_control_entry * Vernacstate.Synterp.t) list
-  | EVernacExtend of Vernacextend.typed_vernac
+  | EVernacExtend of Vernactypes.typed_vernac
 
 and vernac_entry = synterp_entry Vernacexpr.vernac_expr_gen
 

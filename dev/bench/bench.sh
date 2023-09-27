@@ -55,27 +55,28 @@ check_variable () {
 #check_variable "JOB_NAME"
 #check_variable "JENKINS_URL"
 #check_variable "CI_JOB_URL"
+#check_variable "CI_REPOSITORY_URL"
 
 : "${coq_pr_number:=}"
 : "${coq_pr_comment_id:=}"
 : "${new_ocaml_version:=4.09.1}"
 : "${old_ocaml_version:=4.09.1}"
-: "${new_coq_repository:=https://gitlab.com/coq/coq.git}"
-: "${old_coq_repository:=https://gitlab.com/coq/coq.git}"
+: "${new_coq_repository:=$CI_REPOSITORY_URL}"
+: "${old_coq_repository:=$CI_REPOSITORY_URL}"
 : "${new_coq_opam_archive_git_uri:=https://github.com/coq/opam-coq-archive.git}"
 : "${old_coq_opam_archive_git_uri:=https://github.com/coq/opam-coq-archive.git}"
 : "${new_coq_opam_archive_git_branch:=master}"
 : "${old_coq_opam_archive_git_branch:=master}"
 : "${num_of_iterations:=1}"
 : "${timeout:=3h}"
-: "${coq_opam_packages:=coq-bignums coq-hott coq-performance-tests-lite coq-engine-bench-lite coq-mathcomp-ssreflect coq-mathcomp-fingroup coq-mathcomp-algebra coq-mathcomp-solvable coq-mathcomp-field coq-mathcomp-character coq-mathcomp-odd-order coq-math-classes coq-corn coq-compcert coq-equations coq-metacoq-template coq-metacoq-pcuic coq-metacoq-safechecker coq-metacoq-erasure coq-metacoq-translations coq-geocoq coq-color coq-coqprime coq-coqutil coq-bedrock2 coq-rewriter coq-fiat-core coq-fiat-parsers coq-fiat-crypto-with-bedrock coq-unimath coq-coquelicot coq-iris-examples coq-verdi coq-verdi-raft coq-fourcolor coq-rewriter-perf-SuperFast coq-perennial coq-vst coq-category-theory}"
+: "${coq_opam_packages:=coq-bignums coq-hott coq-performance-tests-lite coq-engine-bench-lite coq-mathcomp-ssreflect coq-mathcomp-fingroup coq-mathcomp-algebra coq-mathcomp-solvable coq-mathcomp-field coq-mathcomp-character coq-mathcomp-odd-order coq-math-classes coq-corn coq-compcert coq-equations coq-metacoq-template coq-metacoq-pcuic coq-metacoq-safechecker coq-metacoq-erasure coq-metacoq-translations coq-color coq-coqprime coq-coqutil coq-bedrock2 coq-rewriter coq-fiat-core coq-fiat-parsers coq-fiat-crypto-with-bedrock coq-unimath coq-coquelicot coq-iris-examples coq-verdi coq-verdi-raft coq-fourcolor coq-rewriter-perf-SuperFast coq-perennial coq-vst coq-category-theory}"
 : "${coq_native:=}"
+
+: "${new_coq_commit:=$(git rev-parse HEAD^2)}"
+: "${old_coq_commit:=$(git merge-base HEAD^1 $new_coq_commit)}"
 
 new_ocaml_switch=ocaml-base-compiler.$new_ocaml_version
 old_ocaml_switch=ocaml-base-compiler.$old_ocaml_version
-
-new_coq_commit=$(git rev-parse HEAD^2)
-old_coq_commit=$(git merge-base HEAD^1 $new_coq_commit)
 
 if echo "$num_of_iterations" | grep '^[1-9][0-9]*$' 2> /dev/null > /dev/null; then
     :
@@ -457,6 +458,8 @@ skipped_packages=
 
 # Generate per line timing info in devs that use coq_makefile
 export TIMING=1
+export PROFILING=1
+export COQ_PROFILE_COMPONENTS=command,parse_command
 
 for coq_opam_package in $sorted_coq_opam_packages; do
 

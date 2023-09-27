@@ -8,7 +8,6 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 open Names
-open Univ
 open Values
 
 (********************************************)
@@ -51,8 +50,10 @@ shared without reallocating a more structured representation. *)
 type structured_constant =
   | Const_sort of Sorts.t
   | Const_ind of inductive
+  | Const_evar of Evar.t
   | Const_b0 of tag
   | Const_univ_level of Univ.Level.t
+  | Const_univ_instance of Univ.Instance.t
   | Const_val of structured_values
   | Const_uint of Uint63.t
   | Const_float of Float64.t
@@ -99,10 +100,14 @@ let eq_structured_constant c1 c2 = match c1, c2 with
 | Const_sort _, _ -> false
 | Const_ind i1, Const_ind i2 -> Ind.CanOrd.equal i1 i2
 | Const_ind _, _ -> false
+| Const_evar e1, Const_evar e2 -> Evar.equal e1 e2
+| Const_evar _, _ -> false
 | Const_b0 t1, Const_b0 t2 -> Int.equal t1 t2
 | Const_b0 _, _ -> false
 | Const_univ_level l1 , Const_univ_level l2 -> Univ.Level.equal l1 l2
 | Const_univ_level _ , _ -> false
+| Const_univ_instance u1 , Const_univ_instance u2 -> Univ.Instance.equal u1 u2
+| Const_univ_instance _ , _ -> false
 | Const_val v1, Const_val v2 -> eq_structured_values v1 v2
 | Const_val _, _ -> false
 | Const_uint i1, Const_uint i2 -> Uint63.equal i1 i2
@@ -115,11 +120,13 @@ let hash_structured_constant c =
   match c with
   | Const_sort s -> combinesmall 1 (Sorts.hash s)
   | Const_ind i -> combinesmall 2 (Ind.CanOrd.hash i)
-  | Const_b0 t -> combinesmall 3 (Int.hash t)
-  | Const_univ_level l -> combinesmall 4 (Univ.Level.hash l)
-  | Const_val v -> combinesmall 5 (hash_structured_values v)
-  | Const_uint i -> combinesmall 6 (Uint63.hash i)
-  | Const_float f -> combinesmall 7 (Float64.hash f)
+  | Const_evar e -> combinesmall 3 (Evar.hash e)
+  | Const_b0 t -> combinesmall 4 (Int.hash t)
+  | Const_univ_level l -> combinesmall 5 (Univ.Level.hash l)
+  | Const_univ_instance u -> combinesmall 6 (Univ.Instance.hash u)
+  | Const_val v -> combinesmall 7 (hash_structured_values v)
+  | Const_uint i -> combinesmall 8 (Uint63.hash i)
+  | Const_float f -> combinesmall 9 (Float64.hash f)
 
 let eq_annot_switch asw1 asw2 =
   let eq_rlc (i1, j1) (i2, j2) = Int.equal i1 i2 && Int.equal j1 j2 in
@@ -145,8 +152,10 @@ let pp_sort s =
 let pp_struct_const = function
   | Const_sort s -> pp_sort s
   | Const_ind (mind, i) -> Pp.(MutInd.print mind ++ str"#" ++ int i)
+  | Const_evar e -> Pp.( str "Evar(" ++ int (Evar.repr e) ++ str ")")
   | Const_b0 i -> Pp.int i
   | Const_univ_level l -> Univ.Level.raw_pr l
+  | Const_univ_instance u -> Univ.Instance.pr Univ.Level.raw_pr u
   | Const_val _ -> Pp.str "(value)"
   | Const_uint i -> Pp.str (Uint63.to_string i)
   | Const_float f -> Pp.str (Float64.to_string f)
@@ -289,7 +298,7 @@ let arg args i =
 (* Destructors ***********************************)
 (*************************************************)
 
-let uni_lvl_val (v : values) : Univ.Level.t = Obj.magic v
+let uni_instance (v : values) : Univ.Instance.t = Obj.magic v
 
 let rec whd_accu a stk =
   let stk =
@@ -301,11 +310,11 @@ let rec whd_accu a stk =
      begin match stk with
      | [] -> Vaccu (Obj.magic at, stk)
      | [Zapp args] ->
-        let args = Array.init (nargs args) (arg args) in
+        let () = assert (Int.equal (nargs args) 1) in
+        let inst = uni_instance (arg args 0) in
         let s = Obj.obj (Obj.field at 0) in
         begin match s with
         | Sorts.Type u ->
-          let inst = Instance.of_array (Array.map uni_lvl_val args) in
           let u = Univ.subst_instance_universe inst u in
           Vaccu (Asort (Sorts.sort_of_univ u), [])
         | _ -> assert false
@@ -399,8 +408,10 @@ let obj_of_str_const str =
   match str with
   | Const_sort s -> obj_of_atom (Asort s)
   | Const_ind ind -> obj_of_atom (Aind ind)
+  | Const_evar e -> obj_of_atom (Aid (EvarKey e))
   | Const_b0 tag -> Obj.repr tag
   | Const_univ_level l -> Obj.repr l
+  | Const_univ_instance u -> Obj.repr u
   | Const_val v -> Obj.repr v
   | Const_uint i -> Obj.repr i
   | Const_float f -> Obj.repr f

@@ -243,8 +243,6 @@ val simplest_case         : constr -> unit Proofview.tactic
 
 (** {6 Eliminations giving the type instead of the proof. } *)
 
-val case_type         : types -> unit Proofview.tactic
-val elim_type         : types -> unit Proofview.tactic
 val exfalso : unit Proofview.tactic
 
 (** {6 Constructor tactics. } *)
@@ -332,6 +330,7 @@ val letin_pat_tac : evars_flag -> (bool * intro_pattern_naming) option ->
 val constr_eq : strict:bool -> constr -> constr -> unit Proofview.tactic
 
 val unify           : ?state:TransparentState.t -> constr -> constr -> unit Proofview.tactic
+val evarconv_unify : ?state:TransparentState.t -> ?with_ho:bool -> constr -> constr -> unit Proofview.tactic
 
 val specialize_eqs : Id.t -> unit Proofview.tactic
 

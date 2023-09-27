@@ -172,6 +172,14 @@ Section Facts.
     now destruct l, l'.
   Qed.
 
+  Lemma app_eq_cons x y z (a : A):
+    x ++ y = a :: z -> (x = nil /\ y = a :: z) \/ exists x', x = a :: x' /\ z = x' ++ y.
+  Proof.
+    intro H. destruct x as [|b x].
+    - now left.
+    - right. injection H as ->. now exists x.
+  Qed.
+
   Theorem app_eq_unit (x y:list A) (a:A) :
       x ++ y = [a] -> x = [] /\ y = [a] \/ x = [a] /\ y = [].
   Proof.
@@ -319,6 +327,21 @@ Section Facts.
   intros x y l1 l2 Hin.
   apply in_app_or in Hin.
   destruct Hin as [Hin|[Hin|Hin]]; [right|left|right]; try apply in_or_app; intuition.
+  Qed.
+
+  Lemma app_inj_pivot x1 x2 y1 y2 (a : A): x1 ++ a :: x2 = y1 ++ a :: y2 ->
+    ((In a x1 /\ In a y2) \/ (In a x2 /\ In a y1)) \/ (x1 = y1 /\ x2 = y2).
+  Proof.
+    induction y1 as [|b y1 IHy] in x1 |- *; intros [[-> H]|[x' [-> H]]]%app_eq_cons.
+    - right. now injection H.
+    - subst y2.
+      left; left. split; [apply in_eq | apply in_elt].
+    - injection H as -> ->.
+      left; right. split; [ apply in_elt | apply in_eq ].
+    - symmetry in H. apply IHy in H as [[[]|[]]|[]].
+      + left; left. split; [apply in_cons|]; assumption.
+      + left; right. split; [|apply in_cons]; assumption.
+      + right. split; congruence.
   Qed.
 
   (** Inversion *)
@@ -591,6 +614,34 @@ Section Elts.
     - injection (Hnth 0) as ->. f_equal. apply IHl.
       intro n. exact (Hnth (S n)).
   Qed.
+
+  Lemma unfold_nth_error l n
+    : nth_error l n
+      = match n, l with
+        | O, x :: _ => Some x
+        | S n, _ :: l => nth_error l n
+        | _, _ => None
+        end.
+  Proof. destruct n; reflexivity. Qed.
+
+  Lemma nth_error_nil n : nth_error nil n = None.
+  Proof. destruct n; reflexivity. Qed.
+
+  Lemma nth_error_cons x xs n
+    : nth_error (x :: xs) n
+      = match n with
+        | O => Some x
+        | S n => nth_error xs n
+        end.
+  Proof. apply unfold_nth_error. Qed.
+
+  Lemma nth_error_O l
+    : nth_error l O = hd_error l.
+  Proof. destruct l; reflexivity. Qed.
+
+  Lemma nth_error_S l n
+    : nth_error l (S n) = nth_error (tl l) n.
+  Proof. destruct l; rewrite ?nth_error_nil; reflexivity. Qed.
 
   (** Results directly relating [nth] and [nth_error] *)
 
@@ -904,6 +955,13 @@ Section ListOps.
     intro l; induction l as [| a l IHl].
     - reflexivity.
     - cbn. now rewrite rev_unit, IHl.
+  Qed.
+
+  Lemma rev_inj (l1 l2: list A):
+    rev l1 = rev l2 -> l1 = l2.
+  Proof.
+    intro H. apply (f_equal rev) in H.
+    rewrite !rev_involutive in H. assumption.
   Qed.
 
   Lemma rev_eq_app : forall l l1 l2, rev l = l1 ++ l2 -> l = rev l2 ++ rev l1.
@@ -1371,7 +1429,7 @@ End Fold_Right_Recursor.
     match l with
       | nil => cons nil nil
       | cons x t =>
-	flat_map (fun f:list (A * B) => map (fun y:B => cons (x, y) f) l')
+        flat_map (fun f:list (A * B) => map (fun y:B => cons (x, y) f) l')
         (list_power t l')
     end.
 
@@ -1817,12 +1875,12 @@ End Fold_Right_Recursor.
 
     Lemma in_prod_aux :
       forall (x:A) (y:B) (l:list B),
-	In y l -> In (x, y) (map (fun y0:B => (x, y0)) l).
+        In y l -> In (x, y) (map (fun y0:B => (x, y0)) l).
     Proof.
       intros x y l; induction l;
-	[ simpl; auto
-	  | simpl; destruct 1 as [H1| ];
-	    [ left; rewrite H1; trivial | right; auto ] ].
+        [ simpl; auto
+          | simpl; destruct 1 as [H1| ];
+            [ left; rewrite H1; trivial | right; auto ] ].
     Qed.
 
     Lemma in_prod :
@@ -2051,9 +2109,9 @@ Section Cutting.
     match n with
       | 0 => nil
       | S n => match l with
-		 | nil => nil
-		 | a::l => a::(firstn n l)
-	       end
+                 | nil => nil
+                 | a::l => a::(firstn n l)
+               end
     end.
 
   Lemma firstn_nil n: firstn n [] = [].
@@ -2132,9 +2190,9 @@ Section Cutting.
     match n with
       | 0 => l
       | S n => match l with
-		 | nil => nil
-		 | a::l => skipn n l
-	       end
+                 | nil => nil
+                 | a::l => skipn n l
+               end
     end.
 
   Lemma firstn_skipn_comm : forall m n l,

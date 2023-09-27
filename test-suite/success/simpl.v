@@ -22,7 +22,7 @@ with copy_of_compute_size_tree (t:tree) : nat :=
 Eval simpl in (copy_of_compute_size_forest leaf).
 
 
-(* Another interesting case: Hrec has to occurrences: one cannot be folded
+(* Another interesting case: Hrec has two occurrences: one cannot be folded
    back to f while the second can. *)
 Parameter g : (nat->nat)->nat->nat->nat.
 
@@ -35,15 +35,18 @@ Definition f (n n':nat) :=
 Goal forall a b, f (S a) b = b.
 intros.
 simpl.
+match goal with [ |- g (f a) (f a a) b = b ] => idtac end.
 admit.
-Qed. (* Qed will fail if simpl performs eta-expansion *)
+Qed.
 
 (* Yet another example. *)
 
 Require Import List.
 
 Goal forall A B (a:A) l f (i:B), fold_right f i ((a :: l))=i.
+intros.
 simpl.
+match goal with [ |- f0 a (fold_right f0 i l) = i ] => idtac end.
 admit.
 Qed. (* Qed will fail if simplification is incorrect (de Bruijn!) *)
 
@@ -114,3 +117,14 @@ simpl u.
 match goal with |- 0 = 0 => idtac end. (* Check that it reduced *)
 Abort.
 End FurtherAppliedPrimitiveProjections.
+
+Module BugUniverseMutualFix.
+Set Universe Polymorphism.
+Fixpoint foo1@{u v} (A : Type@{u}) n : Type@{v} := match n with 0 => A | S n => (foo2 A n * A)%type end
+with foo2@{u v} (A : Type@{u}) n : Type@{v} := match n with 0 => A | S n => (foo1 A n * A)%type end.
+Set Printing Universes.
+Definition bar@{u} (A : Type@{u}) n := foo1@{u u} A n.
+Goal forall n, bar unit (S n) = unit.
+simpl.
+Abort.
+End BugUniverseMutualFix.

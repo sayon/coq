@@ -16,8 +16,6 @@ open Libnames
 open Constrexpr
 open Names
 
-val prec_less : entry_level -> entry_relative_level -> bool
-
 val pr_tight_coma : unit -> Pp.t
 
 val pr_with_comments : ?loc:Loc.t -> Pp.t -> Pp.t
@@ -78,6 +76,15 @@ val default_term_pr : term_pr
 
 val lsimpleconstr : entry_relative_level
 val ltop : entry_relative_level
+
+(* Print at level "simpleconstr"  (applications are surrounded with parentheses)
+   ensured not to be overriden, on the contrary of pr_constr_expr *)
+val pr_simpleconstr : constr_expr -> Pp.t
+
+(* Print at level "top" (no parentheses)
+   ensured not to be overriden, on the contrary of pr_lconstr_expr *)
+val pr_top : constr_expr -> Pp.t
+
 val modular_constr_pr :
-  ((unit->Pp.t) -> entry_relative_level -> constr_expr -> Pp.t) ->
-  (unit->Pp.t) -> entry_relative_level -> constr_expr -> Pp.t
+  ((unit->Pp.t) -> int option -> entry_relative_level -> constr_expr -> Pp.t) ->
+  (unit->Pp.t) -> int option -> entry_relative_level -> constr_expr -> Pp.t

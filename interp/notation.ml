@@ -57,7 +57,7 @@ let pr_notation (from,ntn) = qstring ntn ++ match from with InConstrEntry -> mt 
 module NotationOrd =
   struct
     type t = notation
-    let compare = pervasives_compare
+    let compare = Stdlib.compare
   end
 
 module NotationSet = Set.Make(NotationOrd)
@@ -66,7 +66,7 @@ module NotationMap = CMap.Make(NotationOrd)
 module SpecificNotationOrd =
   struct
     type t = specific_notation
-    let compare = pervasives_compare
+    let compare = Stdlib.compare
   end
 
 module SpecificNotationSet = Set.Make(SpecificNotationOrd)
@@ -592,7 +592,7 @@ let rec glob_of_constr token_kind ?loc env sigma c = match Constr.kind c with
   | Sort Sorts.SProp -> DAst.make ?loc (Glob_term.GSort (Glob_term.UNamed (None, [Glob_term.GSProp, 0])))
   | Sort Sorts.Prop -> DAst.make ?loc (Glob_term.GSort (Glob_term.UNamed (None, [Glob_term.GProp, 0])))
   | Sort Sorts.Set -> DAst.make ?loc (Glob_term.GSort (Glob_term.UNamed (None, [Glob_term.GSet, 0])))
-  | Sort (Sorts.Type _) -> DAst.make ?loc (Glob_term.GSort (Glob_term.UAnonymous {rigid=true}))
+  | Sort (Sorts.Type _) -> DAst.make ?loc (Glob_term.GSort (Glob_term.UAnonymous {rigid=UnivRigid}))
   | _ -> Loc.raise ?loc (PrimTokenNotationError(token_kind,env,sigma,UnexpectedTerm c))
 
 let no_such_prim_token uninterpreted_token_kind ?loc ty =
@@ -1409,7 +1409,7 @@ let find_notation ntn sc =
 let notation_of_prim_token = function
   | Constrexpr.Number (SPlus,n) -> InConstrEntry, NumTok.Unsigned.sprint n
   | Constrexpr.Number (SMinus,n) -> InConstrEntry, "- "^NumTok.Unsigned.sprint n
-  | String _ -> raise Not_found
+  | String s -> InConstrEntry, String.quote_coq_string s
 
 let find_prim_token check_allowed ?loc p sc =
   (* Try for a user-defined numerical notation *)
@@ -1449,19 +1449,8 @@ let interp_prim_token_gen ?loc g p local_scopes =
 let interp_prim_token ?loc =
   interp_prim_token_gen ?loc (fun _ -> ())
 
-let rec check_allowed_ref_in_pat looked_for = DAst.(with_val (function
-  | GVar _ | GHole _ -> ()
-  | GRef (g,_) -> looked_for g
-  | GApp (f, l) ->
-    begin match DAst.get f with
-    | GRef (g, _) ->
-      looked_for g; List.iter (check_allowed_ref_in_pat looked_for) l
-    | _ -> raise Not_found
-    end
-  | _ -> raise Not_found))
-
-let interp_prim_token_cases_pattern_expr ?loc looked_for p =
-  interp_prim_token_gen ?loc (check_allowed_ref_in_pat looked_for) p
+let interp_prim_token_cases_pattern_expr ?loc check_allowed p =
+  interp_prim_token_gen ?loc check_allowed p
 
 let warn_deprecated_notation =
   Deprecation.create_warning ~object_name:"Notation" ~warning_name_if_no_since:"deprecated-notation"
@@ -1526,7 +1515,7 @@ type entry_coercion = (notation_with_optional_scope * notation) list
 module EntryCoercionOrd =
  struct
   type t = notation_entry * notation_entry
-   let compare = pervasives_compare
+   let compare = Stdlib.compare
  end
 
 module EntryCoercionMap = Map.Make(EntryCoercionOrd)
@@ -1561,10 +1550,10 @@ let rec search nfrom nto = function
   | ((pfrom,pto),coe)::l ->
     if entry_relative_level_le pfrom nfrom && entry_relative_level_le nto pto then coe else search nfrom nto l
 
-let availability_of_entry_coercion
+let availability_of_entry_coercion ?(non_empty=false)
     ({ notation_subentry = entry; notation_relative_level = sublev } as entry_sublev)
     ({ notation_entry = entry'; notation_level = lev' } as entry_lev) =
-  if included entry_lev entry_sublev then
+  if included entry_lev entry_sublev && not non_empty then
     (* [entry] is by default included in [relative_entry] *)
     Some []
   else
@@ -1645,12 +1634,24 @@ let entry_has_ident { notation_subentry = entry; notation_relative_level = n } =
   | InCustomEntry s ->
      try entry_relative_level_le (String.Map.find s !entry_has_ident_map) n with Not_found -> false
 
+let app_level = 10
+
+let prec_less child = function
+  | LevelLt parent -> child < parent
+  | LevelLe parent -> child <= parent
+  | LevelSome -> true
+
+let may_capture_cont_after child parent =
+  match child with
+  | None -> false
+  | Some lev_after -> prec_less lev_after parent
+
 type entry_coercion_kind =
   | IsEntryCoercion of notation_entry_level * notation_entry_relative_level
   | IsEntryGlobal of string * int
   | IsEntryIdent of string * int
 
-let declare_notation (scopt,ntn) pat df ~use ~also_in_cases_pattern coe deprecation =
+let declare_notation (scopt,ntn) pat df ~use coe deprecation =
   (* Register the interpretation *)
   let scope = match scopt with NotationInScope s -> s | LastLonelyNotation -> default_scope in
   let sc = find_scope scope in
@@ -1678,7 +1679,7 @@ let declare_notation (scopt,ntn) pat df ~use ~also_in_cases_pattern coe deprecat
      | Some pat -> remove_uninterpretation (NotationRule (scopt,ntn)) pat
      | None -> ()
      end;
-     declare_uninterpretation ~also_in_cases_pattern (NotationRule (scopt,ntn)) pat
+     declare_uninterpretation (NotationRule (scopt,ntn)) pat
   end
 
 let availability_of_prim_token n printer_scope local_scopes =
@@ -1782,27 +1783,38 @@ end
 
 module ScopeClassMap = Map.Make(ScopeClassOrd)
 
-let initial_scope_class_map : scope_name list ScopeClassMap.t =
+(* pairs of Top and Bottom additions (Boolean is for locality) *)
+type scope_class_map =
+  ((scope_name * bool) list * (scope_name * bool) list) ScopeClassMap.t
+
+let initial_scope_class_map : scope_class_map =
   ScopeClassMap.empty
 
 let scope_class_map = ref initial_scope_class_map
 
 type add_scope_where = AddScopeTop | AddScopeBottom
 
-let declare_scope_class sc ?where cl =
-  let scl = match where with
-    | None -> [sc]
+let declare_scope_class islocal sc ?where cl =
+  let map = match where with
+    | None ->
+      ScopeClassMap.add cl ([sc, islocal], []) !scope_class_map
     | Some where ->
-       let scl = try ScopeClassMap.find cl !scope_class_map with Not_found -> [] in
-       match where with AddScopeTop -> sc :: scl | AddScopeBottom -> scl @ [sc] in
-  scope_class_map := ScopeClassMap.add cl scl !scope_class_map
+      let add (scl1,scl2) = match where with AddScopeTop -> ((sc,islocal) :: scl1, scl2) | AddScopeBottom -> (scl1, scl2 @ [sc,islocal]) in
+      let scl = try ScopeClassMap.find cl !scope_class_map with Not_found -> ([],[]) in
+      ScopeClassMap.add cl (add scl) !scope_class_map in
+  scope_class_map := map
 
-let find_scope_class cl =
-  ScopeClassMap.find cl !scope_class_map
+let find_scope_class_blocks_opt map = function
+  | None -> [], []
+  | Some cl ->
+    try
+      let ltop, lbot = ScopeClassMap.find cl map in
+      List.map fst ltop, List.map fst lbot
+    with Not_found -> [], []
 
-let find_scope_class_opt = function
-  | None -> []
-  | Some cl -> try find_scope_class cl with Not_found -> []
+let find_scope_class_opt map cl =
+  let ltop, lbot = find_scope_class_blocks_opt map cl in
+  ltop @ lbot
 
 (**********************************************************************)
 (* Special scopes associated to arguments of a global reference *)
@@ -1815,18 +1827,19 @@ let rec compute_arguments_classes env sigma t =
         cl :: compute_arguments_classes env sigma u
     | _ -> []
 
-let compute_arguments_scope_full env sigma t =
+let compute_arguments_scope_full env sigma map t =
   let cls = compute_arguments_classes env sigma t in
-  let scs = List.map find_scope_class_opt cls in
+  let scs = List.map (find_scope_class_opt map) cls in
   scs, cls
 
-let compute_arguments_scope env sigma t = fst (compute_arguments_scope_full env sigma t)
+let compute_arguments_scope env sigma t =
+  fst (compute_arguments_scope_full env sigma !scope_class_map t)
 
 let compute_type_scope env sigma t =
-  find_scope_class_opt (try Some (compute_scope_class env sigma t) with Not_found -> None)
+  find_scope_class_opt !scope_class_map (try Some (compute_scope_class env sigma t) with Not_found -> None)
 
 let current_type_scope_names () =
-   find_scope_class_opt (Some CL_SORT)
+   find_scope_class_opt !scope_class_map (Some CL_SORT)
 
 let scope_class_of_class (x : cl_typ) : scope_class =
   x
@@ -1834,17 +1847,28 @@ let scope_class_of_class (x : cl_typ) : scope_class =
 (** Updating a scope list, thanks to a list of argument classes
     and the current Bind Scope base. When some current scope
     have been manually given, the corresponding argument class
-    is emptied below, so this manual scope will be preserved. *)
+    is emptied below, so this manual scope will be preserved. That is,
+    cls and scl have this form:
 
-let update_scope cl sco =
-  match find_scope_class_opt cl with
-  | [] -> sco
-  | sco' -> sco'
+         dynam. recomputed
+         when out of sync     manual
+           /----------\    /-----------\
+    scl =  sc1 ... scn     sc1' ... scn'
+    cls =  cl1 ... cln     empty list
+           \----------/
+        static. computed
+       at cache/rebuild time
+*)
+
+let update_scope sco cl =
+  let (sctop,scbot) = find_scope_class_blocks_opt !scope_class_map cl in
+  let sco = List.filter (fun sc -> not (List.exists (String.equal sc) sctop || List.exists (String.equal sc) scbot)) sco in
+  sctop@sco@scbot
 
 let rec update_scopes cls scl = match cls, scl with
   | [], _ -> scl
-  | _, [] -> List.map find_scope_class_opt cls
-  | cl :: cls, sco :: scl -> update_scope cl sco :: update_scopes cls scl
+  | _, [] -> List.map (update_scope []) cls
+  | cl :: cls, sco :: scl -> update_scope sco cl :: update_scopes cls scl
 
 let arguments_scope = ref GlobRef.Map.empty
 
@@ -1853,9 +1877,12 @@ type arguments_scope_discharge_request =
   | ArgsScopeManual
   | ArgsScopeNoDischarge
 
-let load_arguments_scope _ (_,r,n,scl,cls) =
+let load_arguments_scope _ (_,r,scl,cls,allscopes) =
   List.iter (List.iter check_scope) scl;
-  let initial_stamp = ScopeClassMap.empty in
+  (* force recomputation to take into account the possible extra "Bind
+     Scope" of the current environment (e.g. so that after inlining of a
+     parameter in a functor, it takes the current environment into account *)
+  let initial_stamp = initial_scope_class_map in
   arguments_scope := GlobRef.Map.add r (scl,cls,initial_stamp) !arguments_scope
 
 let cache_arguments_scope o =
@@ -1864,7 +1891,7 @@ let cache_arguments_scope o =
 let subst_scope_class env subst cs =
   try Some (subst_cl_typ env subst cs) with Not_found -> None
 
-let subst_arguments_scope (subst,(req,r,n,scl,cls)) =
+let subst_arguments_scope (subst,(req,r,scl,cls,allscopes)) =
   let r' = fst (subst_global subst r) in
   let subst_cl ocl = match ocl with
     | None -> ocl
@@ -1874,9 +1901,16 @@ let subst_arguments_scope (subst,(req,r,n,scl,cls)) =
         | Some cl'  as ocl' when cl' != cl -> ocl'
         | _ -> ocl in
   let cls' = List.Smart.map subst_cl cls in
-  (ArgsScopeNoDischarge,r',n,scl,cls')
+  (ArgsScopeNoDischarge,r',scl,cls',allscopes)
 
-let discharge_arguments_scope (req,r,n,l,_) =
+let discharge_available_scopes map =
+  (* Remove local scopes *)
+  ScopeClassMap.filter_map (fun cl (ltop, lbot) ->
+      let ltop = List.filter (fun x -> not (snd x)) ltop in
+      let lbot = List.filter (fun x -> not (snd x)) lbot in
+      if List.is_empty ltop && List.is_empty lbot then None else Some (ltop, lbot)) map
+
+let discharge_arguments_scope (req,r,scs,_cls,available_scopes) =
   if req == ArgsScopeNoDischarge || (isVarRef r && Lib.is_in_section r) then None
   else
     let n =
@@ -1884,35 +1918,42 @@ let discharge_arguments_scope (req,r,n,l,_) =
         Array.length (Lib.section_instance r)
       with
         Not_found (* Not a ref defined in this section *) -> 0 in
-    Some (req,r,n,l,[])
+    let available_scopes = discharge_available_scopes available_scopes in
+    (* Hack: use list cls to encode an integer to pass to rebuild for Manual case *)
+    (* since cls is anyway recomputed in rebuild *)
+    let n_as_cls = List.make n None in
+    Some (req,r,scs,n_as_cls,available_scopes)
 
 let classify_arguments_scope (req,_,_,_,_) =
   if req == ArgsScopeNoDischarge then Dispose else Substitute
 
-let rebuild_arguments_scope sigma (req,r,n,l,_) =
+let rebuild_arguments_scope sigma (req,r,scs,n_as_cls,available_scopes) =
   match req with
     | ArgsScopeNoDischarge -> assert false
     | ArgsScopeAuto ->
       let env = Global.env () in (*FIXME?*)
       let typ = EConstr.of_constr @@ fst (Typeops.type_of_global_in_context env r) in
-      let scs,cls = compute_arguments_scope_full env sigma typ in
-      (req,r,List.length scs,scs,cls)
+      let scs,cls = compute_arguments_scope_full env sigma available_scopes typ in
+      (* Note: cls is fixed, but scs can be recomputed in find_arguments_scope *)
+      (req,r,scs,cls,available_scopes)
     | ArgsScopeManual ->
       (* Add to the manually given scopes the one found automatically
          for the extra parameters of the section. Discard the classes
          of the manually given scopes to avoid further re-computations. *)
       let env = Global.env () in (*FIXME?*)
+      let n = List.length n_as_cls in
       let typ = EConstr.of_constr @@ fst (Typeops.type_of_global_in_context env r) in
-      let l',cls = compute_arguments_scope_full env sigma typ in
-      let l1 = List.firstn n l' in
+      let scs',cls = compute_arguments_scope_full env sigma available_scopes typ in
+      let scs1 = List.firstn n scs' in
       let cls1 = List.firstn n cls in
-      (req,r,0,l1@l,cls1)
+      (* Note: the extra cls1 is fixed, but its associated scs can be recomputed *)
+      (* on the undefined part of cls, scs is however fixed *)
+      (req,r,scs1@scs,cls1,available_scopes)
 
 type arguments_scope_obj =
     arguments_scope_discharge_request * GlobRef.t *
-    (* Used to communicate information from discharge to rebuild *)
-    (* set to 0 otherwise *) int *
-    scope_name list list * scope_class option list
+    scope_name list list * scope_class option list *
+    scope_class_map
 
 let inArgumentsScope : arguments_scope_obj -> obj =
   declare_object {(default_object "ARGUMENTS-SCOPE") with
@@ -1926,14 +1967,14 @@ let inArgumentsScope : arguments_scope_obj -> obj =
 
 let is_local local ref = local || isVarRef ref && Lib.is_in_section ref
 
-let declare_arguments_scope_gen req r n (scl,cls) =
-  Lib.add_leaf (inArgumentsScope (req,r,n,scl,cls))
+let declare_arguments_scope_gen req r (scl,cls) =
+  Lib.add_leaf (inArgumentsScope (req,r,scl,cls,!scope_class_map))
 
 let declare_arguments_scope local r scl =
   let req = if is_local local r then ArgsScopeNoDischarge else ArgsScopeManual in
   (* We empty the list of argument classes to disable further scope
      re-computations and keep these manually given scopes. *)
-  declare_arguments_scope_gen req r 0 (scl,[])
+  declare_arguments_scope_gen req r (scl,[])
 
 let find_arguments_scope r =
   try
@@ -1951,8 +1992,9 @@ let declare_ref_arguments_scope ref =
   let env = Global.env () in (* FIXME? *)
   let sigma = Evd.from_env env in
   let typ = EConstr.of_constr @@ fst @@ Typeops.type_of_global_in_context env ref in
-  let (scs,cls as o) = compute_arguments_scope_full env sigma typ in
-  declare_arguments_scope_gen ArgsScopeAuto ref (List.length scs) o
+  (* cls is fixed but scs is only an initial value that can be modified in find_arguments_scope *)
+  let (scs,cls as o) = compute_arguments_scope_full env sigma !scope_class_map typ in
+  declare_arguments_scope_gen ArgsScopeAuto ref o
 
 (********************************)
 (* Encoding notations as string *)
@@ -1974,6 +2016,8 @@ let rec symbol_eq s1 s2 = match s1, s2 with
 let rec string_of_symbol = function
   | NonTerminal _ -> ["_"]
   | Terminal "_" -> ["'_'"]
+  (* Symbols starting with a double quote without denoting a string are single quoted *)
+  | Terminal s when s.[0] = '"' && (String.length s = 1 || s.[String.length s - 1] <> '"') -> ["'" ^ s ^ "'"]
   | Terminal s -> [s]
   | SProdList (_,l) ->
      let l = List.flatten (List.map string_of_symbol l) in "_"::l@".."::l@["_"]
@@ -1984,9 +2028,19 @@ let make_notation_key from symbols =
 
 let decompose_notation_pure_key s =
   let len = String.length s in
+  let rec find_string_end n =
+    let next =
+      try String.index_from s (n+1) '"'
+      with Not_found -> assert false
+    in
+    if next = len - 1 then next+1
+    else if s.[next+1] = '"' then (* skip doubled double quotes: *) find_string_end (next+2)
+    else next+1 in
   let rec decomp_ntn dirs n =
     if n>=len then List.rev dirs else
     let pos =
+      if s.[n] = '"' then find_string_end n
+      else
       try
         String.index_from s n ' '
       with Not_found -> len
@@ -2002,15 +2056,16 @@ let decompose_notation_pure_key s =
 let decompose_notation_key (from,s) =
   from, decompose_notation_pure_key s
 
-let is_numeral_in_constr (entry,symbs) =
+let is_prim_token_constant_in_constr (entry, symbs) =
   match entry, List.filter (function Break _ -> false | _ -> true) symbs with
-  | InConstrEntry, ([Terminal "-"; Terminal x] | [Terminal x]) ->
-      NumTok.Unsigned.parse_string x <> None
-  | _ ->
-      false
+  (* Is this a numeral? *)
+  | InConstrEntry, ([Terminal "-"; Terminal x] | [Terminal x]) when NumTok.Unsigned.parse_string x <> None -> true
+  (* Is this a string constant? *)
+  | InConstrEntry, [Terminal x] when let n = String.length x in n > 1 && x.[0] = '"' && x.[n-1] = '"' -> true
+  | _ -> false
 
 let level_of_notation ntn =
-  if is_numeral_in_constr (decompose_notation_key ntn) then
+  if is_prim_token_constant_in_constr (decompose_notation_key ntn) then
     (* A primitive notation *)
     ({ notation_entry = fst ntn; notation_level = 0}, []) (* TODO: string notations*)
   else
@@ -2024,7 +2079,11 @@ let pr_delimiters_info = function
   | Some key -> str "Delimiting key is " ++ str key
 
 let classes_of_scope sc =
-  ScopeClassMap.fold (fun cl sc' l -> if List.mem_f String.equal sc sc' then cl::l else l) !scope_class_map []
+  let map = !scope_class_map in
+  ScopeClassMap.fold (fun cl (scltop,sclbot) l ->
+      if List.exists (fun (sc',_) -> String.equal sc sc') scltop ||
+         List.exists (fun (sc',_) -> String.equal sc sc') sclbot
+      then cl::l else l) map []
 
 let pr_scope_class = pr_class
 
@@ -2038,7 +2097,7 @@ let pr_scope_classes sc =
       spc() ++ prlist_with_sep spc pr_scope_class l)
 
 let pr_notation_info prglob ntn c =
-  str "\"" ++ str ntn ++ str "\" :=" ++ brk (1,2) ++
+  str (String.quote_coq_string ntn) ++ str " :=" ++ brk (1,2) ++
   prglob (Notation_ops.glob_constr_of_notation_constr c)
 
 let pr_notation_status on_parsing on_printing =
@@ -2075,7 +2134,7 @@ let pr_named_scope prglob (scope,sc) =
  (if String.equal scope default_scope then
    match NotationMap.cardinal sc.notations with
      | 0 -> str "No lonely notation"
-     | n -> str "Lonely notation" ++ (if Int.equal n 1 then mt() else str"s")
+     | n -> str (String.plural n "Lonely notation")
   else
     str "Scope " ++ str scope ++ fnl () ++ pr_delimiters_info sc.delimiters)
   ++ pr_non_empty (fnl ()) (pr_scope_classes scope)
@@ -2122,6 +2181,8 @@ let split_notation_string str =
     if i < String.length str then
       if str.[i] == ' ' then
         push_token beg i (loop_on_whitespace (i+1) (i+1))
+      else if beg = i && str.[i] = '"' then
+        loop_on_string i (i+1)
       else
         loop beg (i+1)
     else
@@ -2129,11 +2190,31 @@ let split_notation_string str =
   and loop_on_whitespace beg i =
     if i < String.length str then
       if str.[i] != ' ' then
-        push_whitespace beg i (loop i (i+1))
+        push_whitespace beg i (loop i i)
       else
         loop_on_whitespace beg (i+1)
     else
       push_whitespace beg i []
+  and loop_on_string beg i =
+    (* we accept any string, possibly with spaces, single quotes, and
+       doubled double quotes inside, but necessarily ended with a unique
+       double quote followed either by a space or the end of the
+       notation string *)
+    if i < String.length str then
+      if str.[i] = '"' then
+        if i+1 < String.length str then
+          if str.[i+1] = '"' then (* double quote in the string: *) loop_on_string beg (i+2)
+          else if str.[i+1] = ' ' then (* end of the string: *) push_token beg (i+1) (loop_on_whitespace (i+2) (i+2))
+          else user_err (Pp.str "End of quoted string not followed by a space in notation.")
+        else push_token beg (i+1) []
+      else loop_on_string beg (i+1)
+    else user_err (Pp.str "Unterminated string in notation.")
+    (* we accept any sequences of non-space symbols starting with a
+       single quote, up to the next space or end of notation string;
+       double quotes and single quotes not followed by a space or the
+       end of notation string are allowed;
+       note that if the resulting sequence ends with a single quote,
+       the two extreme single quotes will eventually be removed *)
   in
   loop 0 0
 
@@ -2375,7 +2456,7 @@ let pr_visible_in_scope prglob (scope,ntns) =
       (fun d strm -> pr_notation_data prglob d ++ fnl () ++ strm)
       ntns (mt ()) in
   (if String.equal scope default_scope then
-     str "Lonely notation" ++ (match ntns with [_] -> mt () | _ -> str "s")
+     str (String.plural (List.length ntns) "Lonely notation")
    else
      str "Visible in scope " ++ str scope)
   ++ fnl () ++ strm
@@ -2462,11 +2543,14 @@ let toggle_notations_in_scope ~on found inscope ntn_pattern ntns =
   | _ :: _ as ntn_entries, Some (Inl ntn) ->
     (* shortcut *)
     List.fold_right (fun ntn_entry ntns ->
-      NotationMap.add (ntn_entry, ntn)
-        (toggle_notations_by_interpretation ~on found ntn_pattern
-           (inscope,(ntn_entry,ntn))
-           (NotationMap.find (ntn_entry, ntn) ntns))
-        ntns) ntn_entries ntns
+      try
+        NotationMap.add (ntn_entry, ntn)
+          (toggle_notations_by_interpretation ~on found ntn_pattern
+             (inscope,(ntn_entry,ntn))
+             (NotationMap.find (ntn_entry, ntn) ntns))
+          ntns
+      with Not_found -> ntns)
+        ntn_entries ntns
     (* Deal with full notations *)
   | ntn_entries, ntn_rule -> (* This is the table of notations, not of abbreviations *)
     NotationMap.mapi (fun (ntn_entry,ntn_key' as ntn') data ->

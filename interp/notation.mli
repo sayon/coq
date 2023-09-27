@@ -227,7 +227,7 @@ val declare_string_interpreter : ?local:bool -> scope_name -> required_module ->
 val interp_prim_token : ?loc:Loc.t -> prim_token -> subscopes ->
   glob_constr * scope_name option
 (* This function returns a glob_const representing a pattern *)
-val interp_prim_token_cases_pattern_expr : ?loc:Loc.t -> (GlobRef.t -> unit) -> prim_token ->
+val interp_prim_token_cases_pattern_expr : ?loc:Loc.t -> (Glob_term.glob_constr -> unit) -> prim_token ->
   subscopes -> glob_constr * scope_name option
 
 (** Return the primitive token associated to a [term]/[cases_pattern];
@@ -250,7 +250,6 @@ type entry_coercion_kind =
 
 val declare_notation : notation_with_optional_scope * notation ->
   interpretation -> notation_location -> use:notation_use ->
-  also_in_cases_pattern:bool ->
   entry_coercion_kind option ->
   Deprecation.t option -> unit
 
@@ -304,7 +303,7 @@ val subst_scope_class :
 
 type add_scope_where = AddScopeTop | AddScopeBottom
 (** add new scope at top or bottom of existing stack (default is reset) *)
-val declare_scope_class : scope_name -> ?where:add_scope_where -> scope_class -> unit
+val declare_scope_class : (* local: *) bool -> scope_name -> ?where:add_scope_where -> scope_class -> unit
 val declare_ref_arguments_scope : GlobRef.t -> unit
 
 val compute_arguments_scope : Environ.env -> Evd.evar_map -> EConstr.types -> scope_name list list
@@ -335,6 +334,9 @@ type notation_symbols = {
   symbols : symbol list; (* the decomposition of the notation into terminals and nonterminals *)
 }
 
+val is_prim_token_constant_in_constr :
+  notation_entry * symbol list -> bool
+
 (** Decompose a notation of the form "a 'U' b" together with the lists
     of pairs of recursive variables and the list of all variables
     binding in the notation *)
@@ -360,7 +362,7 @@ val declare_entry_coercion : specific_notation -> notation_entry_level -> notati
   (** Add a coercion from some-entry to some-relative-entry *)
 
 type entry_coercion = (notation_with_optional_scope * notation) list
-val availability_of_entry_coercion : notation_entry_relative_level -> notation_entry_level -> entry_coercion option
+val availability_of_entry_coercion : ?non_empty:bool -> notation_entry_relative_level -> notation_entry_level -> entry_coercion option
   (** Return a coercion path from some-relative-entry to some-entry if there is one *)
 
 (** Special properties of entries *)
@@ -370,6 +372,11 @@ val declare_custom_entry_has_ident : string -> int -> unit
 
 val entry_has_global : notation_entry_relative_level -> bool
 val entry_has_ident : notation_entry_relative_level -> bool
+
+val app_level : int
+
+val prec_less : entry_level -> entry_relative_level -> bool
+val may_capture_cont_after : entry_level option -> entry_relative_level -> bool
 
 (** {6 Declare and test the level of a (possibly uninterpreted) notation } *)
 

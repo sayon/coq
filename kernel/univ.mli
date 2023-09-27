@@ -82,10 +82,6 @@ sig
     val diff : 'a t -> 'a t -> 'a t
     (** [diff x y] removes bindings from x that appear in y (whatever the value). *)
 
-    val subst_union : 'a option t -> 'a option t -> 'a option t
-    (** [subst_union x y] favors the bindings of the first map that are [Some],
-        otherwise takes y's bindings. *)
-
     val pr : (key -> Pp.t) -> ('a -> Pp.t) -> 'a t -> Pp.t
     (** Pretty-printing *)
   end
@@ -414,13 +410,6 @@ val abstract_universes : UContext.t -> Instance.t * AbstractContext.t
 (** TODO: move universe abstraction out of the kernel *)
 
 val make_abstract_instance : AbstractContext.t -> Instance.t
-
-(** [compact_univ u] remaps local variables in [u] such that their indices become
-     consecutive. It returns the new universe and the mapping.
-     Example: compact_univ [(Var 0, i); (Prop, 0); (Var 2; j))] =
-       [(Var 0,i); (Prop, 0); (Var 1; j)], [0; 2]
-*)
-val compact_univ : Universe.t -> Universe.t * int list
 
 (** {6 Pretty-printing of universes. } *)
 

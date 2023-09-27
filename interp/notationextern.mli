@@ -30,6 +30,9 @@ val interpretation_eq : interpretation -> interpretation -> bool
 val notation_entry_level_eq : notation_entry_level -> notation_entry_level -> bool
 (** Equality on [notation_entry_level]. *)
 
+val notation_entry_relative_level_eq : notation_entry_relative_level -> notation_entry_relative_level -> bool
+(** Equality on [notation_entry_relative_level]. *)
+
 type level = notation_entry_level * entry_relative_level list
 (** The "signature" of a rule: its level together with the levels of its subentries *)
 
@@ -47,7 +50,7 @@ type 'a interp_rule_gen =
 type interp_rule = KerName.t interp_rule_gen
 
 val remove_uninterpretation : interp_rule -> interpretation -> unit
-val declare_uninterpretation : ?also_in_cases_pattern:bool -> interp_rule -> interpretation -> unit
+val declare_uninterpretation : interp_rule -> interpretation -> unit
 
 type notation_applicative_status =
   | AppBoundedNotation of int

@@ -325,7 +325,7 @@ rest of the Coq manual: :term:`terms <term>` and :term:`types
      Intuitively, types may be viewed as sets containing terms.  We
      say that a type is :gdef:`inhabited` if it contains at least one
      term (i.e. if we can find a term which is associated with this
-     type).  We call such terms :gdef:`witnesses <witness>`.  Note that deciding
+     type).  We call such terms :gdef:`inhabitants <inhabitant>`.  Note that deciding
      whether a type is inhabited is `undecidable
      <https://en.wikipedia.org/wiki/Undecidable_problem>`_.
 
@@ -607,7 +607,7 @@ Locality attributes supported by :cmd:`Set` and :cmd:`Unset`
 
 The :cmd:`Set` and :cmd:`Unset` commands support the mutually
 exclusive :attr:`local`, :attr:`export` and :attr:`global` locality
-attributes (or the ``Local``, ``Export`` or ``Global`` prefixes).
+attributes.
 
 If no attribute is specified, the original value of the flag or option
 is restored at the end of the current module but it is *not* restored

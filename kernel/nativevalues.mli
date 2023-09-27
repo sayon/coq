@@ -35,7 +35,6 @@ type reloc_table = (tag * arity) array
 
 type annot_sw = {
     asw_ind : inductive;
-    asw_ci : case_info;
     asw_reloc : reloc_table;
     asw_finite : bool;
     asw_prefix : string
@@ -117,7 +116,7 @@ val napply : t -> t array -> t
 
 val dummy_value : unit -> t
 val atom_of_accu : accumulator -> atom
-val args_of_accu : accumulator -> t array
+val args_of_accu : accumulator -> t list
 val accu_nargs : accumulator -> int
 
 val cast_accu : t -> accumulator
